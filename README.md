@@ -97,6 +97,28 @@ plugins:
 
 ---
 
+## WebUI 演示
+
+### 配置编辑
+
+直接编辑 YAML 配置，通过插件索引快速定位插件定义。
+
+![WebUI 配置编辑器与插件索引演示](.github/img/config_editor.gif)
+
+### 插件依赖图
+
+以依赖图查看插件引用、`sequence` 分支和执行器组合。
+
+![WebUI 插件依赖图与 sequence 分支演示](.github/img/plugin_dep.gif)
+
+### 查询追踪
+
+从查询记录查看响应详情、匹配结果和实际执行路径。
+
+![WebUI 查询记录与执行路径追踪演示](.github/img/query_tracing.gif)
+
+---
+
 ## 快速开始
 
 一条命令安装最新 release，并默认注册和启动为系统服务：
