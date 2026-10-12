@@ -3,10 +3,13 @@ title: 上下文与策略匹配器
 ---
 
 import Admonition from "@theme/Admonition";
+import PluginAvailability from "@site/src/components/PluginAvailability";
 
 这些 matcher 使用 mark、环境、时间、概率、速率限制或字符串表达式决定策略分支。
 
 ## `mark`
+
+<PluginAvailability from="minimal" />
 
 ### 作用
 
@@ -52,6 +55,8 @@ import Admonition from "@theme/Admonition";
 ---
 
 ## `env`
+
+<PluginAvailability from="minimal" />
 
 ### 作用
 
@@ -109,6 +114,8 @@ args:
 ---
 
 ## `time`
+
+<PluginAvailability from="minimal" />
 
 ### 作用
 
@@ -171,6 +178,8 @@ quick setup 仅支持系统时区下的单个每日窗口；星期、月日和�
 
 ## `random`
 
+<PluginAvailability from="minimal" />
+
 ### 作用
 
 按概率命中。
@@ -209,6 +218,8 @@ quick setup 仅支持系统时区下的单个每日窗口；星期、月日和�
 ---
 
 ## `rate_limiter`
+
+<PluginAvailability from="minimal" />
 
 ### 作用
 

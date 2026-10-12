@@ -3,16 +3,13 @@ title: Observability and Debugging
 ---
 
 import Admonition from "@theme/Admonition";
+import PluginAvailability from "@site/src/components/PluginAvailability";
 
 These executors record queries, export metrics, or support debugging and tests. Evaluate hot-path cost and data retention.
 
 ## `learn_domain`
 
-<Admonition type="warning" title="Experimental Plugin (Introduced in v1.2.0)">
-
-`learn_domain` was first introduced in `v1.2.0` and is currently in an **experimental** stage. Filtering rules, write trigger timing, and the integration interface with `dynamic_domain_set` may change in future releases. Before deploying in production, please evaluate the impact of learning rates and disk writes on the persistence layer.
-
-</Admonition>
+<PluginAvailability from="standard" />
 
 ### Purpose
 
@@ -117,6 +114,8 @@ Observes qnames in the DNS pipeline and writes matching request names into a tar
 
 ## `query_summary`
 
+<PluginAvailability from="minimal" />
+
 ### Purpose
 
 Records concise query summaries.
@@ -156,6 +155,8 @@ Records concise query summaries.
 ---
 
 ## `query_recorder`
+
+<PluginAvailability from="standard" />
 
 ### Purpose
 
@@ -345,6 +346,8 @@ Time bounds and the record limit constrain statistics work together. Complex fil
 
 ## `metrics_collector`
 
+<PluginAvailability from="standard" />
+
 ### Purpose
 
 Collects Prometheus metrics for query handling.
@@ -390,6 +393,8 @@ Collects Prometheus metrics for query handling.
 
 ## `debug_print`
 
+<PluginAvailability from="minimal" />
+
 ### Purpose
 
 Prints a debug message.
@@ -425,6 +430,8 @@ Prints a debug message.
 ---
 
 ## `sleep`
+
+<PluginAvailability from="minimal" />
 
 ### Purpose
 

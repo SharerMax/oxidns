@@ -103,7 +103,7 @@ const config = {
               : 'docs';
             return `https://github.com/svenshi/oxidns/edit/main/docs/${sourcePath}/${docPath}`;
           },
-          showLastUpdateTime: true,
+          showLastUpdateTime: false,
         },
         blog: false,
         theme: {

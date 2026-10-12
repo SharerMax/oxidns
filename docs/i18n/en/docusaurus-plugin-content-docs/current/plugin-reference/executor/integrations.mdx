@@ -3,10 +3,13 @@ title: External and System Integrations
 ---
 
 import Admonition from "@theme/Admonition";
+import PluginAvailability from "@site/src/components/PluginAvailability";
 
 These executors project DNS context into HTTP, scripts, Linux sets, or RouterOS. Isolate side-effect failures from the primary resolution path.
 
 ## `http_request`
+
+<PluginAvailability from="standard" />
 
 ### Purpose
 
@@ -168,6 +171,8 @@ Sends callback requests to external `http/https` services. It can trigger before
 
 ## `script`
 
+<PluginAvailability from="standard" />
+
 ### Purpose
 
 Runs an explicitly configured external command and injects a stable subset of the current `DnsContext` into command arguments or environment variables.
@@ -264,6 +269,8 @@ Runs an explicitly configured external command and injects a stable subset of th
 
 ## `ipset`
 
+<PluginAvailability from="full" />
+
 ### Purpose
 
 Writes response IPs into Linux `ipset` through the embedded Rust netlink backend, without requiring the runtime `ipset` command.
@@ -341,6 +348,8 @@ Here, `family` is `inet` or `inet6`.
 ---
 
 ## `nftset`
+
+<PluginAvailability from="full" />
 
 ### Purpose
 
@@ -458,6 +467,8 @@ Format:
 ---
 
 ## `ros_address_list`
+
+<PluginAvailability from="full" />
 
 ### Purpose
 
@@ -677,6 +688,8 @@ args:
 </Admonition>
 
 ## `ros_route`
+
+<PluginAvailability from="full" />
 
 ### Purpose
 

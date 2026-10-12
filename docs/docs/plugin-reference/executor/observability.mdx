@@ -3,16 +3,13 @@ title: 观测与调试
 ---
 
 import Admonition from "@theme/Admonition";
+import PluginAvailability from "@site/src/components/PluginAvailability";
 
 这些执行器记录查询、导出指标或提供调试与测试辅助；应评估热路径开销和数据保留策略。
 
 ## `learn_domain`
 
-<Admonition type="warning" title="实验性插件（v1.2.0 引入）">
-
-`learn_domain` 在 `v1.2.0` 首次发布，目前处于**实验阶段**：过滤条件、写入触发时机与配套 `dynamic_domain_set` 的接口可能在后续版本调整。生产部署前请评估学习速率与磁盘写入对持久化层的影响。
-
-</Admonition>
+<PluginAvailability from="standard" />
 
 ### 作用
 
@@ -117,6 +114,8 @@ import Admonition from "@theme/Admonition";
 
 ## `query_summary`
 
+<PluginAvailability from="minimal" />
+
 ### 作用
 
 在后续链路执行完后输出紧凑查询摘要。
@@ -162,6 +161,8 @@ import Admonition from "@theme/Admonition";
 ---
 
 ## `query_recorder`
+
+<PluginAvailability from="standard" />
 
 ### 作用
 
@@ -354,6 +355,8 @@ WebUI 的所有聚合视图共用最近 10 分钟、1 小时、24 小时快捷�
 
 ## `metrics_collector`
 
+<PluginAvailability from="standard" />
+
 ### 作用
 
 收集轻量级请求计数与延时指标，并导出 Prometheus 格式。
@@ -406,6 +409,8 @@ WebUI 的所有聚合视图共用最近 10 分钟、1 小时、24 小时快捷�
 
 ## `debug_print`
 
+<PluginAvailability from="minimal" />
+
 ### 作用
 
 打印请求与响应对象，便于调试。
@@ -445,6 +450,8 @@ WebUI 的所有聚合视图共用最近 10 分钟、1 小时、24 小时快捷�
 ---
 
 ## `sleep`
+
+<PluginAvailability from="minimal" />
 
 ### 作用
 

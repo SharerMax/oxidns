@@ -3,10 +3,13 @@ title: HTTP 与 QUIC 加密入口
 ---
 
 import Admonition from "@theme/Admonition";
+import PluginAvailability from "@site/src/components/PluginAvailability";
 
 基于 HTTP 和 QUIC 的加密 DNS 入口，包括 DoH、HTTP/2、可选 HTTP/3 和 DoQ。
 
 ## `http_server`
+
+<PluginAvailability from="standard" note="HTTP/3 支持：仅 full" />
 
 ### 作用
 
@@ -152,6 +155,8 @@ import Admonition from "@theme/Admonition";
 </Admonition>
 
 ## `quic_server`
+
+<PluginAvailability from="standard" />
 
 ### 作用
 

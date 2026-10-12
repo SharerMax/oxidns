@@ -3,10 +3,13 @@ title: 外部与系统集成
 ---
 
 import Admonition from "@theme/Admonition";
+import PluginAvailability from "@site/src/components/PluginAvailability";
 
 这些执行器把 DNS 上下文投影到 HTTP、脚本、Linux 集合或 RouterOS。副作用失败策略应与主解析路径隔离。
 
 ## `http_request`
+
+<PluginAvailability from="standard" />
 
 ### 作用
 
@@ -168,6 +171,8 @@ import Admonition from "@theme/Admonition";
 
 ## `script`
 
+<PluginAvailability from="standard" />
+
 ### 作用
 
 执行一个显式声明的外部命令，并把当前 `DnsContext` 中的一部分稳定字段注入为参数或环境变量。
@@ -264,6 +269,8 @@ import Admonition from "@theme/Admonition";
 
 ## `ipset`
 
+<PluginAvailability from="full" />
+
 ### 作用
 
 把响应中的 IP 写入 Linux `ipset`。底层通过内置 Rust netlink 后端完成，不依赖运行时 `ipset` 命令。
@@ -341,6 +348,8 @@ import Admonition from "@theme/Admonition";
 ---
 
 ## `nftset`
+
+<PluginAvailability from="full" />
 
 ### 作用
 
@@ -458,6 +467,8 @@ import Admonition from "@theme/Admonition";
 ---
 
 ## `ros_address_list`
+
+<PluginAvailability from="full" />
 
 ### 作用
 
@@ -695,6 +706,8 @@ args:
 </Admonition>
 
 ## `ros_route`
+
+<PluginAvailability from="full" />
 
 ### 作用
 

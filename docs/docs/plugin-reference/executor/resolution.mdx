@@ -3,10 +3,13 @@ title: 解析与请求处理
 ---
 
 import Admonition from "@theme/Admonition";
+import PluginAvailability from "@site/src/components/PluginAvailability";
 
 这些执行器负责上游解析、缓存、本地应答、请求改写和 EDNS 信息传递。
 
 ## `forward`
+
+<PluginAvailability from="minimal" />
 
 ### 作用
 
@@ -330,6 +333,8 @@ import Admonition from "@theme/Admonition";
 
 ## `cache`
 
+<PluginAvailability from="minimal" />
+
 ### 作用
 
 对响应做 TTL 感知缓存，支持负缓存与持久化。
@@ -498,6 +503,8 @@ import Admonition from "@theme/Admonition";
 
 ## `hosts`
 
+<PluginAvailability from="minimal" />
+
 ### 作用
 
 按域名规则直接返回静态 `A` / `AAAA`。
@@ -572,6 +579,8 @@ import Admonition from "@theme/Admonition";
 ---
 
 ## `arbitrary`
+
+<PluginAvailability from="standard" />
 
 ### 作用
 
@@ -649,6 +658,8 @@ import Admonition from "@theme/Admonition";
 
 ## `response`
 
+<PluginAvailability from="standard" />
+
 ### 作用
 
 无条件构造并覆盖当前 DNS 响应。它适合策略性返回固定答案、带 SOA 的 NODATA、或需要同时控制 Answer、Authority 和 Additional 的响应；调用条件由外层 `sequence` 的 matcher 决定。
@@ -721,6 +732,8 @@ args:
 ---
 
 ## `redirect`
+
+<PluginAvailability from="minimal" />
 
 ### 作用
 
@@ -813,6 +826,8 @@ old-static.example.com static.example.net
 
 ## `client_ip_from_ecs`
 
+<PluginAvailability from="standard" />
+
 ### 作用
 
 把请求 EDNS Client Subnet（ECS）中的地址设为当前 `DnsContext` 的客户端 IP。
@@ -876,6 +891,8 @@ ECS 可由请求方伪造。请把 dnsmasq 的真实连接地址或网段明确�
 ---
 
 ## `ecs_handler`
+
+<PluginAvailability from="minimal" />
 
 ### 作用
 
@@ -966,6 +983,8 @@ ECS 可由请求方伪造。请把 dnsmasq 的真实连接地址或网段明确�
 ---
 
 ## `forward_edns0opt`
+
+<PluginAvailability from="minimal" />
 
 ### 作用
 

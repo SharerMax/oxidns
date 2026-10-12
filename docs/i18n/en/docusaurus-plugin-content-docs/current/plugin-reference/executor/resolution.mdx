@@ -3,10 +3,13 @@ title: Resolution and Request Handling
 ---
 
 import Admonition from "@theme/Admonition";
+import PluginAvailability from "@site/src/components/PluginAvailability";
 
 These executors provide upstream resolution, caching, local answers, request rewriting, and EDNS propagation.
 
 ## `forward`
+
+<PluginAvailability from="minimal" />
 
 ### Purpose
 
@@ -282,6 +285,8 @@ Per-upstream series are also exported with an `upstream` label (the upstream tag
 
 ## `cache`
 
+<PluginAvailability from="minimal" />
+
 ### Purpose
 
 Provides TTL-aware response caching with negative cache support and persistence.
@@ -438,6 +443,8 @@ Exported through the global `GET /api/metrics` endpoint. The cache plugin does n
 
 ## `hosts`
 
+<PluginAvailability from="minimal" />
+
 ### Purpose
 
 Returns local static answers using host-style entries.
@@ -518,6 +525,8 @@ Exported through the global `GET /api/metrics` endpoint:
 
 ## `arbitrary`
 
+<PluginAvailability from="standard" />
+
 ### Purpose
 
 Injects arbitrary DNS records from zone-style rule strings.
@@ -596,6 +605,8 @@ Injects arbitrary DNS records from zone-style rule strings.
 
 ## `response`
 
+<PluginAvailability from="standard" />
+
 ### Purpose
 
 Unconditionally builds and replaces the current DNS response. Use an outer `sequence` matcher to decide when it runs; the plugin is suited to fixed answers, SOA-backed NODATA, and responses that need explicit Answer, Authority, and Additional sections.
@@ -668,6 +679,8 @@ args:
 ---
 
 ## `redirect`
+
+<PluginAvailability from="minimal" />
 
 ### Purpose
 
@@ -768,6 +781,8 @@ Common `sequence` usage:
 
 ## `client_ip_from_ecs`
 
+<PluginAvailability from="standard" />
+
 ### Purpose
 
 Sets the current `DnsContext` client IP from the request's EDNS Client Subnet
@@ -838,6 +853,8 @@ complete client IP.
 ---
 
 ## `ecs_handler`
+
+<PluginAvailability from="minimal" />
 
 ### Purpose
 
@@ -922,6 +939,8 @@ Controls EDNS Client Subnet forwarding or injection.
 ---
 
 ## `forward_edns0opt`
+
+<PluginAvailability from="minimal" />
 
 ### Purpose
 
