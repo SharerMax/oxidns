@@ -3,10 +3,13 @@ title: 响应匹配器
 ---
 
 import Admonition from "@theme/Admonition";
+import PluginAvailability from "@site/src/components/PluginAvailability";
 
 这些 matcher 检查响应地址、CNAME、RCODE，以及是否已有期望类型的 answer。
 
 ## `resp_ip`
+
+<PluginAvailability from="minimal" />
 
 ### 作用
 
@@ -50,6 +53,8 @@ import Admonition from "@theme/Admonition";
 ---
 
 ## `cname`
+
+<PluginAvailability from="minimal" />
 
 ### 作用
 
@@ -97,6 +102,8 @@ import Admonition from "@theme/Admonition";
 
 ## `rcode`
 
+<PluginAvailability from="minimal" />
+
 ### 作用
 
 匹配当前响应的 rcode。
@@ -139,6 +146,8 @@ import Admonition from "@theme/Admonition";
 
 ## `has_resp`
 
+<PluginAvailability from="minimal" />
+
 ### 作用
 
 只要上下文中已有响应就命中。
@@ -167,6 +176,8 @@ import Admonition from "@theme/Admonition";
 ---
 
 ## `has_wanted_ans`
+
+<PluginAvailability from="minimal" />
 
 ### 作用
 
