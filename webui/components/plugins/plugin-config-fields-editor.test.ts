@@ -526,6 +526,33 @@ describe("optional object config fields", () => {
   });
 });
 
+describe("hosts format config", () => {
+  const schema = pluginKindDefinitions.find(
+    (definition) => definition.kind === "hosts",
+  )!.configSchema;
+
+  it("keeps the inherited format out of generated config", () => {
+    const values = createDefaultPluginConfigValues(schema);
+    expect(serializePluginConfigValues(schema, values)).not.toHaveProperty(
+      "format",
+    );
+  });
+
+  it("preserves an explicitly selected format when editing entries", () => {
+    for (const format of ["oxidns", "standard"]) {
+      const entries =
+        format === "standard"
+          ? ["192.0.2.1 example.test"]
+          : ["example.test 192.0.2.1"];
+      const values = createPluginConfigFormValues(schema, { format, entries });
+      expect(serializePluginConfigValues(schema, values)).toMatchObject({
+        format,
+        entries,
+      });
+    }
+  });
+});
+
 describe("optional reference config fields", () => {
   it("omits a cleared dual selector probe executor", () => {
     for (const definition of preferDefinitions) {

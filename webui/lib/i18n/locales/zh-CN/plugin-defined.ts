@@ -572,9 +572,18 @@ export const zhCNPluginDefined = {
       name: "Hosts",
       description: "按域名规则直接返回静态 A / AAAA",
       fields: {
+        format: {
+          label: "规则格式",
+          description: "选择 entries 和 files 的规则格式；省略时使用 oxidns。",
+          options: {
+            oxidns: "OxiDNS（域名在前）",
+            standard: "标准 hosts（IP 在前）",
+          },
+        },
         entries: {
           label: "内联 hosts 规则",
-          description: "定义内联 hosts 规则。",
+          description:
+            "规则格式由 format 决定；standard 使用 IP 主机名 [别名…]。",
           example:
             "router.local 192.168.1.1\nfull:gateway.local 192.168.1.2\ndomain:svc.local 10.0.0.10\nkeyword:nas 192.168.1.20\nregexp:^api[0-9]+\\.corp\\.local$ 10.10.0.5",
         },
@@ -584,7 +593,7 @@ export const zhCNPluginDefined = {
         },
         files: {
           label: "hosts 文件",
-          description: "指定外部 hosts 规则文件列表。",
+          description: "按 format 指定的格式加载外部 hosts 规则文件。",
           example: "/etc/oxidns/hosts.txt",
         },
         "files[]": {
