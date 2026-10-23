@@ -2475,6 +2475,12 @@ export const enUSPluginDefined = {
         paramPlaceholder: "SERVFAIL,NXDOMAIN or 2,3",
       },
     },
+    has_cname: {
+      name: "Has CNAME",
+      description:
+        "Match when the response Answer section contains a CNAME record",
+      fields: {},
+    },
     has_resp: {
       name: "Has Response",
       description: "Hit when there is already a response in the context",

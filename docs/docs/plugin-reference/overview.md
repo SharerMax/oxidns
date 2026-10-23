@@ -163,6 +163,7 @@ server -> sequence
 | [`cname`](matcher/response.mdx#cname) | 匹配响应中的 CNAME 目标域名。 | <PluginAvailability from="minimal" compact /> |
 | [`rcode`](matcher/response.mdx#rcode) | 匹配当前响应的 rcode。 | <PluginAvailability from="minimal" compact /> |
 | [`has_resp`](matcher/response.mdx#has_resp) | 只要上下文中已有响应就命中。 | <PluginAvailability from="minimal" compact /> |
+| [`has_cname`](matcher/response.mdx#has_cname) | 判断响应 Answer 区是否包含 CNAME 记录。 | <PluginAvailability from="minimal" compact /> |
 | [`has_wanted_ans`](matcher/response.mdx#has_wanted_ans) | 判断响应 answers 中是否包含与请求 qtype 对应的记录。 | <PluginAvailability from="minimal" compact /> |
 
 </div>
