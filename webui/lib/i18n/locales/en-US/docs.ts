@@ -583,6 +583,9 @@ export const enUSDocs = {
   rcode: {
     args: "`args` of `rcode` is a list of rcodes.\n\n- Type: `array`; Required: Yes; Default: None\n- Function: Define the set of response codes that can be hit.\n- Supports both enum literals and decimal values, such as `NOERROR` / `SERVFAIL` / `NXDOMAIN` or `0` / `2` / `3`; both formats can be mixed in the same list.\n- Unknown or future extended response codes can continue to be matched using numeric values.\n- Operational impact:\n  - Return `true` only if there is already a response in the context and rcode hits the configuration collection.",
   },
+  has_cname: {
+    args: "No independent configuration fields; quick setup accepts no parameters. Checks only for CNAME records in the current response's Answer section, regardless of request qtype or response RCODE. Returns `false` for a missing response, an empty Answer section, or CNAME records only in Authority/Additional. Use after upstream resolution or local response creation; use `cname` to match target domain names.",
+  },
   has_resp: {
     args: "No independent configuration fields.",
   },

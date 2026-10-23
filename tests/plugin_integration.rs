@@ -1367,6 +1367,86 @@ plugins:
 }
 
 #[tokio::test]
+async fn test_has_cname_config_and_sequence_expressions() -> Result<()> {
+    use oxidns::proto::rdata::CNAME;
+    use oxidns::proto::{RData, Record};
+
+    let config = parse_config(
+        r#"
+plugins:
+  - tag: response_has_cname
+    type: has_cname
+  - tag: seq
+    type: sequence
+    args:
+      - matches: $response_has_cname
+        exec: mark 1
+      - matches: has_cname
+        exec: mark 2
+      - matches: "!$response_has_cname"
+        exec: mark 3
+      - matches: "!has_cname"
+        exec: mark 4
+"#,
+    )?;
+    let registry = plugin::init(config).await?;
+    let matcher = registry
+        .get_plugin("response_has_cname")
+        .expect("has_cname matcher should be registered");
+    assert_eq!(matcher.plugin_type, PluginType::Matcher);
+    assert_eq!(matcher.plugin_name, "has_cname");
+    let sequence = registry
+        .get_plugin("seq")
+        .expect("sequence should exist")
+        .to_executor();
+
+    for has_cname in [false, true] {
+        let mut context = make_context(registry.clone(), "example.com.");
+        if has_cname {
+            let mut response = Message::new();
+            response.add_answer(Record::from_rdata(
+                Name::from_ascii("example.com.")?,
+                60,
+                RData::CNAME(CNAME(Name::from_ascii("target.example.com.")?)),
+            ));
+            context.set_response(response);
+        }
+
+        assert_eq!(matcher.to_matcher().is_match(&mut context), has_cname);
+        assert_eq!(sequence.execute(&mut context).await?, ExecStep::Next);
+        assert_eq!(context.marks().contains(&1), has_cname);
+        assert_eq!(context.marks().contains(&2), has_cname);
+        assert_eq!(context.marks().contains(&3), !has_cname);
+        assert_eq!(context.marks().contains(&4), !has_cname);
+    }
+
+    registry.destroy().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_has_cname_sequence_rejects_parameters() -> Result<()> {
+    let config = parse_config(
+        r#"
+plugins:
+  - tag: seq
+    type: sequence
+    args:
+      - matches: has_cname unexpected
+        exec: accept
+"#,
+    )?;
+    let err = plugin::init(config)
+        .await
+        .expect_err("has_cname quick setup should reject parameters");
+    assert!(
+        err.to_string()
+            .contains("has_cname does not accept parameters")
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_time_matcher_config_and_quick_setup_initialize() -> Result<()> {
     let yaml = r#"
 log:

@@ -230,6 +230,15 @@ export const matcherPluginDefinitions: PluginKindDefinition[] = [
     },
   },
   {
+    kind: "has_cname",
+    type: "matcher",
+    name: "Has CNAME",
+    description: "响应 Answer 区包含 CNAME 记录时命中",
+    icon: "CheckCircle",
+    configSchema: [],
+    quickSetup: {},
+  },
+  {
     kind: "has_resp",
     type: "matcher",
     name: "Has Response",

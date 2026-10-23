@@ -2267,6 +2267,11 @@ export const zhCNPluginDefined = {
         paramPlaceholder: "SERVFAIL,NXDOMAIN 或 2,3",
       },
     },
+    has_cname: {
+      name: "Has CNAME",
+      description: "响应 Answer 区包含 CNAME 记录时命中",
+      fields: {},
+    },
     has_resp: {
       name: "Has Response",
       description: "上下文中已有响应时命中",

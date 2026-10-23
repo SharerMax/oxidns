@@ -163,6 +163,7 @@ See [Matcher Plugins](matcher.mdx) for full field reference.
 | [`cname`](matcher/response.mdx#cname) | Matches CNAME targets in the response. | <PluginAvailability from="minimal" compact /> |
 | [`rcode`](matcher/response.mdx#rcode) | Matches the current response code. | <PluginAvailability from="minimal" compact /> |
 | [`has_resp`](matcher/response.mdx#has_resp) | Matches when a response already exists in the context. | <PluginAvailability from="minimal" compact /> |
+| [`has_cname`](matcher/response.mdx#has_cname) | Checks whether the response Answer section contains a CNAME record. | <PluginAvailability from="minimal" compact /> |
 | [`has_wanted_ans`](matcher/response.mdx#has_wanted_ans) | Matches when the response already contains answers of the wanted qtype. | <PluginAvailability from="minimal" compact /> |
 
 </div>

@@ -560,6 +560,9 @@ export const pluginFieldDocs = {
   rcode: {
     args: "`rcode` 的 `args` 为 rcode 列表。\n\n- 类型：`array`；必填：是；默认值：无\n- 作用：定义可命中的响应码集合。\n- 同时支持枚举文本和十进制数值，例如 `NOERROR` / `SERVFAIL` / `NXDOMAIN` 或 `0` / `2` / `3`；同一个列表中可以混用两种格式。\n- 未知或未来扩展响应码可继续使用数值形式匹配。\n- 运行影响：\n  - 仅当上下文中已有响应且 rcode 命中配置集合时返回 `true`。",
   },
+  has_cname: {
+    args: "无独立配置字段，quick setup 不接受参数。仅检查当前响应 Answer 区是否存在 CNAME，不限制请求 qtype 或响应 RCODE；无响应、空 Answer 或仅 Authority/Additional 含 CNAME 时返回 `false`。建议在上游解析或本地应答之后使用；如需匹配 CNAME 目标域名，请使用 `cname`。",
+  },
   has_resp: {
     args: "无独立配置字段。",
   },
