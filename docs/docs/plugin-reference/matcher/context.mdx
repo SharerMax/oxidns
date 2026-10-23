@@ -145,6 +145,7 @@ args:
 - 类型：`string`；必填：否；默认值：系统时区
 - 使用 IANA 时区名称，例如 `Asia/Shanghai`、`UTC`。
 - 未配置时会解析系统时区；无法解析时插件初始化失败，不会静默退回 UTC。
+- OpenWrt 未提供 `/etc/localtime` 时，会读取 `/etc/TZ` 中的 POSIX 时区规则，保留夏令时转换；显式 `TZ` 环境变量优先。
 
 #### `periods`
 
