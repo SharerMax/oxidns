@@ -406,6 +406,7 @@ Schedules a list of executors in the background. It does not participate in the 
 - Notes:
   - Only affects `schedule`.
   - When omitted, OxiDNS uses the system local time zone and falls back to `UTC` if unavailable.
+  - On OpenWrt without `/etc/localtime`, OxiDNS reads POSIX timezone rules from `/etc/TZ`, including daylight saving transitions. An explicit `TZ` environment variable takes precedence.
   - Use IANA names such as `Asia/Shanghai`, `UTC`, or `America/Los_Angeles`.
 
 #### `args.jobs[].name`

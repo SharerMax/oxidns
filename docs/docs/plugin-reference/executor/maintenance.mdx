@@ -408,6 +408,7 @@ WebUI 的 download 插件详情页在运行清单上方提供 **下载全部**�
 - 运行影响：
   - 仅对 `schedule` 生效。
   - 未配置时会使用系统本地时区；无法获取时退回 `UTC`。
+  - OpenWrt 未提供 `/etc/localtime` 时，会读取 `/etc/TZ` 中的 POSIX 时区规则，保留夏令时转换；显式 `TZ` 环境变量优先。
   - 应填写 IANA 时区名称，例如 `Asia/Shanghai`、`UTC`、`America/Los_Angeles`。
 
 #### `args.jobs[].name`
