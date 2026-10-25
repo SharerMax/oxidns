@@ -215,6 +215,13 @@ pub(crate) fn registered_plugin_kind(plugin_type: &str) -> Option<dependency::De
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PluginCreateContext {
     pub dependents: Vec<PluginDependent>,
+    /// True while building a staged runtime whose side effects (metric
+    /// registration, background tasks, API routes, outbound globals) must be
+    /// deferred to the install phase instead of touching process globals.
+    /// Reserved for the staged-reload design (see
+    /// design-zero-downtime-reload.md); always false on the current
+    /// single-runtime path.
+    pub candidate: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

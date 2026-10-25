@@ -73,41 +73,71 @@ impl PluginRuntimeManager {
         let manager = self.clone();
         tokio::spawn(async move {
             let _lifecycle_guard = lifecycle_guard;
-            let mut candidate = PluginRegistry::new();
-            #[cfg(debug_assertions)]
-            candidate.set_test_runtime_guard(test_guard);
-            candidate.load_catalog(try_global_catalog()?);
-            let candidate = Arc::new(candidate);
-
-            let previous = write_rwlock(&manager.current).take();
-            if let Some(previous) = previous {
-                previous.destroy().await;
-            }
-            outbound::clear_global();
-            outbound::install_global(&config.network.outbound)?;
-
-            let matcher_runtime_controls_enabled =
-                cfg!(feature = "api") && config.api.http.is_some();
-            if let Err(err) = candidate
-                .clone()
-                .init_plugins_with_runtime_controls(
-                    config.plugins,
-                    matcher_runtime_controls_enabled,
-                )
+            // Retire the previous runtime before building the candidate:
+            // plugin initialization consults process globals (outbound
+            // profiles) that the candidate replaces. The staged-reload design
+            // will lift this coupling; see design-zero-downtime-reload.md.
+            manager.retire_previous_runtime().await;
+            manager.install_outbound_profiles(&config)?;
+            let candidate = manager
+                .build_registry(config, test_guard)
                 .await
-            {
-                candidate.destroy().await;
-                outbound::clear_global();
-                return Err(err);
-            }
-
-            write_rwlock(&manager.current).replace(candidate.clone());
-            Ok(candidate)
+                .inspect_err(|_| outbound::clear_global())?;
+            Ok(manager.install_runtime(candidate))
         })
         .await
         .map_err(|error| {
             DnsError::runtime(format!("runtime initialization task failed: {error}"))
         })?
+    }
+
+    /// Take and destroy the currently installed runtime, if any.
+    async fn retire_previous_runtime(&self) {
+        let previous = write_rwlock(&self.current).take();
+        if let Some(previous) = previous {
+            previous.destroy().await;
+        }
+    }
+
+    /// Replace the process-global outbound profiles with `config`'s.
+    fn install_outbound_profiles(&self, config: &Config) -> Result<()> {
+        outbound::clear_global();
+        outbound::install_global(&config.network.outbound)
+    }
+
+    /// Build a fully initialized plugin registry from `config` without
+    /// publishing it as the current runtime.
+    ///
+    /// On failure the half-built registry is destroyed, leaving no partial
+    /// state behind.
+    async fn build_registry(
+        &self,
+        config: Config,
+        #[cfg(debug_assertions)] test_guard: Option<tokio::sync::OwnedMutexGuard<()>>,
+    ) -> Result<Arc<PluginRegistry>> {
+        let mut candidate = PluginRegistry::new();
+        #[cfg(debug_assertions)]
+        candidate.set_test_runtime_guard(test_guard);
+        candidate.load_catalog(try_global_catalog()?);
+        let candidate = Arc::new(candidate);
+
+        let matcher_runtime_controls_enabled =
+            cfg!(feature = "api") && config.api.http.is_some();
+        if let Err(err) = candidate
+            .clone()
+            .init_plugins_with_runtime_controls(config.plugins, matcher_runtime_controls_enabled)
+            .await
+        {
+            candidate.destroy().await;
+            return Err(err);
+        }
+        Ok(candidate)
+    }
+
+    /// Publish a built registry as the current runtime.
+    fn install_runtime(&self, candidate: Arc<PluginRuntime>) -> Arc<PluginRuntime> {
+        write_rwlock(&self.current).replace(candidate.clone());
+        candidate
     }
 
     pub async fn destroy_runtime(self: &Arc<Self>) {

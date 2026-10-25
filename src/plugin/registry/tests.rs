@@ -297,6 +297,7 @@ impl PluginFactory for CaptureProviderFactory {
                 plugin_config.tag.clone(),
                 PluginCreateContext {
                     dependents: init_context.dependents().to_vec(),
+                    candidate: false,
                 },
             );
         self.created_tags
