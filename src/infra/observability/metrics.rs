@@ -121,7 +121,65 @@ fn metrics_registry() -> &'static MetricsRegistry {
     REGISTRY.get_or_init(MetricsRegistry::default)
 }
 
+// --- Staged-runtime metric registration -----------------------------------
+//
+// A staged reload builds the candidate runtime while the old one still
+// serves. Candidate plugins register metric sources with the same tags as
+// the old generation; registering directly would shadow the live sources,
+// and the old generation's destroy-time `unregister_metric_source` would
+// then remove the candidate's entries. Staging parks candidate
+// registrations in a side list that `flush_metric_staging` publishes only
+// after the old generation has been destroyed.
+
+static METRIC_STAGING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn pending_sources() -> &'static Mutex<Vec<Arc<dyn MetricSource>>> {
+    static PENDING: OnceLock<Mutex<Vec<Arc<dyn MetricSource>>>> = OnceLock::new();
+    PENDING.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// Park subsequent metric registrations in the staging list instead of the
+/// live registry.
+pub fn begin_metric_staging() {
+    METRIC_STAGING.store(true, std::sync::atomic::Ordering::Release);
+}
+
+/// Publish staged registrations into the live registry and resume direct
+/// registration. Entries are pushed without tag dedup: the previous
+/// generation's same-tag sources stay until its destroy-time unregister
+/// removes the oldest match, and the renderer dedups by tag in the
+/// interim.
+pub fn flush_metric_staging() {
+    METRIC_STAGING.store(false, std::sync::atomic::Ordering::Release);
+    let staged = std::mem::take(&mut *pending_sources().lock().expect("pending metrics poisoned"));
+    if staged.is_empty() {
+        return;
+    }
+    let mut sources = metrics_registry()
+        .sources
+        .lock()
+        .expect("metrics sources poisoned");
+    sources.extend(staged);
+}
+
+/// Discard staged registrations and resume direct registration. Called when
+/// the staged candidate failed and is being destroyed.
+pub fn abort_metric_staging() {
+    METRIC_STAGING.store(false, std::sync::atomic::Ordering::Release);
+    pending_sources()
+        .lock()
+        .expect("pending metrics poisoned")
+        .clear();
+}
+
 pub fn register_metric_source(source: Arc<dyn MetricSource>) -> Result<()> {
+    if METRIC_STAGING.load(std::sync::atomic::Ordering::Acquire) {
+        pending_sources()
+            .lock()
+            .expect("pending metrics poisoned")
+            .push(source);
+        return Ok(());
+    }
     let mut sources = metrics_registry()
         .sources
         .lock()
@@ -132,11 +190,25 @@ pub fn register_metric_source(source: Arc<dyn MetricSource>) -> Result<()> {
 }
 
 pub fn unregister_metric_source(tag: &str) {
+    // While staging, only the candidate's pending entries can be torn down
+    // (a failed candidate destroying itself); the live generation keeps its
+    // sources. After flush, unregister removes only the OLDEST same-tag
+    // entry so the previous generation's destroy does not strip the
+    // candidate's freshly flushed sources.
+    if METRIC_STAGING.load(std::sync::atomic::Ordering::Acquire) {
+        pending_sources()
+            .lock()
+            .expect("pending metrics poisoned")
+            .retain(|source| source.tag() != tag);
+        return;
+    }
     let mut sources = metrics_registry()
         .sources
         .lock()
         .expect("metrics sources poisoned");
-    sources.retain(|source| source.tag() != tag);
+    if let Some(position) = sources.iter().position(|source| source.tag() == tag) {
+        sources.swap_remove(position);
+    }
 }
 
 pub fn render_prometheus_metrics() -> String {
@@ -148,8 +220,22 @@ pub fn render_prometheus_metrics() -> String {
         sources.clone()
     };
 
-    let mut sink = PrometheusRenderSink::default();
+    // During a staged swap the registry briefly holds both generations'
+    // sources with identical tags; keep the newest registration per tag so
+    // scrapes stay valid while the old generation drains.
+    let mut latest: Vec<Arc<dyn MetricSource>> = Vec::with_capacity(sources.len());
     for source in sources {
+        match latest
+            .iter()
+            .position(|existing| existing.tag() == source.tag())
+        {
+            Some(position) => latest[position] = source,
+            None => latest.push(source),
+        }
+    }
+
+    let mut sink = PrometheusRenderSink::default();
+    for source in latest {
         source.collect(&mut sink);
     }
     sink.finish()
@@ -225,6 +311,91 @@ pub(crate) fn metrics_test_guard() -> std::sync::MutexGuard<'static, ()> {
 
 #[cfg(test)]
 mod tests {
+    use super::{
+        MetricLabel, MetricSample, MetricSink, MetricSource, abort_metric_staging,
+        begin_metric_staging, flush_metric_staging, register_metric_source,
+        render_prometheus_metrics, unregister_metric_source,
+    };
+
+    struct CountingSource {
+        tag: &'static str,
+        value: AtomicU64,
+    }
+
+    impl CountingSource {
+        fn new(tag: &'static str) -> Arc<Self> {
+            Arc::new(Self {
+                tag,
+                value: AtomicU64::new(0),
+            })
+        }
+    }
+
+    impl MetricSource for CountingSource {
+        fn tag(&self) -> &str {
+            self.tag
+        }
+
+        fn plugin_type(&self) -> &'static str {
+            "test"
+        }
+
+        fn collect(&self, sink: &mut dyn MetricSink) {
+            sink.emit(MetricSample::counter(
+                "test_metric_total",
+                "help",
+                &[MetricLabel::new("plugin_tag", self.tag)],
+                self.value.load(std::sync::atomic::Ordering::Relaxed),
+            ));
+        }
+    }
+
+    #[test]
+    fn staged_registration_survives_old_generation_unregister() {
+        let old = CountingSource::new("gen-tag");
+        let candidate = CountingSource::new("gen-tag");
+        register_metric_source(old.clone()).expect("register old");
+        register_metric_source(candidate.clone()).expect("shadowing register dedups");
+
+        // Staged reload: candidate parks in pending while old serves.
+        begin_metric_staging();
+        let candidate2 = CountingSource::new("gen-tag");
+        register_metric_source(candidate2.clone()).expect("staged register");
+
+        // Flush publishes without dedup: old + candidate2 coexist.
+        flush_metric_staging();
+
+        // Old generation destroy unregisters the oldest same-tag entry only.
+        unregister_metric_source("gen-tag");
+
+        let rendered = render_prometheus_metrics();
+        let gen_series = rendered
+            .lines()
+            .filter(|line| line.contains("plugin_tag=\"gen-tag\"") && !line.starts_with('#'))
+            .count();
+        assert_eq!(
+            gen_series, 1,
+            "renderer emits exactly one gen-tag series after old-generation unregister"
+        );
+    }
+
+    #[test]
+    fn aborted_staging_leaves_live_registry_untouched() {
+        let live = CountingSource::new("live-tag");
+        register_metric_source(live.clone()).expect("register live");
+
+        begin_metric_staging();
+        let staged = CountingSource::new("staged-tag");
+        register_metric_source(staged).expect("staged register");
+        // A failed candidate destroys itself; its unregister must not touch
+        // live sources.
+        unregister_metric_source("staged-tag");
+        abort_metric_staging();
+
+        let rendered = render_prometheus_metrics();
+        assert!(rendered.contains("test_metric_total"));
+    }
+
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::*;

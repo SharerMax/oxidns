@@ -399,6 +399,34 @@ async fn reload_application(
         "Reloading configuration from management API"
     );
 
+    // Unix: staged reload (design-zero-downtime-reload.md PR-B) — build and
+    // initialize the candidate (binding its listeners for SO_REUSEPORT
+    // overlap) while the old generation keeps serving; a candidate failure
+    // leaves the running assembly untouched. Other platforms fall back to
+    // the stop-the-world flow: binding over the still-live listeners would
+    // fail there.
+    #[cfg(unix)]
+    {
+        match reload_staged(assembly, current_config, &candidate_config, &controller).await {
+            Ok(()) => return Ok(()),
+            Err(ReloadStagedError::Candidate(err)) => {
+                controller.mark_reload_failed(format!("staged reload failed: {err}"));
+                return Ok(());
+            }
+            // Post-swap failure: fall through to the rollback path below.
+            Err(ReloadStagedError::Committed(err)) => {
+                return finish_rollback(
+                    assembly,
+                    current_config,
+                    previous_config,
+                    &controller,
+                    err,
+                )
+                .await;
+            }
+        }
+    }
+
     bootstrap::stop_application(assembly).await;
 
     match bootstrap::start_application(&candidate_config, Some(controller.clone())).await {
@@ -410,29 +438,88 @@ async fn reload_application(
             Ok(())
         }
         Err(reload_err) => {
-            error!("Configuration reload failed: {}", reload_err);
-            match bootstrap::start_application(&previous_config, Some(controller.clone())).await {
-                Ok(restored_assembly) => {
-                    *assembly = restored_assembly;
-                    controller.mark_reload_failed(format!(
-                        "reload failed and previous configuration was restored: {}",
-                        reload_err
-                    ));
-                    Ok(())
-                }
-                Err(rollback_err) => {
-                    controller.mark_reload_failed(format!(
-                        "reload failed: {}; rollback failed: {}",
-                        reload_err, rollback_err
-                    ));
-                    Err(DnsError::runtime(format!(
-                        "reload failed: {}; rollback failed: {}",
-                        reload_err, rollback_err
-                    )))
-                }
-            }
+            finish_rollback(
+                assembly,
+                current_config,
+                previous_config,
+                &controller,
+                reload_err,
+            )
+            .await
         }
     }
+}
+
+/// Failure after the old generation stopped: rebuild the previous
+/// configuration; if that also fails the process exits.
+async fn finish_rollback(
+    assembly: &mut AppAssembly,
+    current_config: &mut Config,
+    previous_config: Config,
+    controller: &std::sync::Arc<AppController>,
+    reload_err: DnsError,
+) -> Result<()> {
+    error!("Configuration reload failed: {}", reload_err);
+    match bootstrap::start_application(&previous_config, Some(controller.clone())).await {
+        Ok(restored_assembly) => {
+            *assembly = restored_assembly;
+            *current_config = previous_config;
+            controller.mark_reload_failed(format!(
+                "reload failed and previous configuration was restored: {}",
+                reload_err
+            ));
+            Ok(())
+        }
+        Err(rollback_err) => {
+            controller.mark_reload_failed(format!(
+                "reload failed: {}; rollback failed: {}",
+                reload_err, rollback_err
+            ));
+            Err(DnsError::runtime(format!(
+                "reload failed: {}; rollback failed: {}",
+                reload_err, rollback_err
+            )))
+        }
+    }
+}
+
+#[cfg(unix)]
+enum ReloadStagedError {
+    /// The candidate failed to build; the running assembly is untouched.
+    Candidate(DnsError),
+    /// The candidate was committed but activation failed afterwards; the
+    /// caller must roll back.
+    Committed(DnsError),
+}
+
+#[cfg(unix)]
+async fn reload_staged(
+    assembly: &mut AppAssembly,
+    current_config: &mut Config,
+    candidate_config: &crate::config::types::Config,
+    controller: &std::sync::Arc<AppController>,
+) -> std::result::Result<(), ReloadStagedError> {
+    use crate::app::bootstrap;
+
+    // Build the candidate while the old generation serves. Background tasks
+    // are NOT stopped: every plugin owns its task-center handles and stops
+    // them in destroy, so the candidate's tasks coexist with the old ones
+    // until the old generation is destroyed.
+    let staged = bootstrap::prepare_assembly(candidate_config, Some(controller.clone()))
+        .await
+        .map_err(ReloadStagedError::Candidate)?;
+
+    // Swap point: retire the old generation, then publish the candidate.
+    bootstrap::stop(assembly).await;
+    let new_assembly = bootstrap::activate_assembly(staged, Some(controller.clone()))
+        .await
+        .map_err(ReloadStagedError::Committed)?;
+
+    *assembly = new_assembly;
+    *current_config = candidate_config.clone();
+    controller.mark_reload_succeeded();
+    info!("Staged configuration reload completed with zero listener downtime");
+    Ok(())
 }
 
 fn load_and_validate_reload_config(path: &std::path::Path) -> Result<Config> {

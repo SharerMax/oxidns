@@ -93,6 +93,141 @@ pub async fn start_application(
     })).await
 }
 
+/// A candidate assembly built by [`prepare_assembly`] while the previous
+/// generation still serves. Activated into a live [`AppAssembly`] by
+/// [`activate_assembly`] once the previous generation has been stopped.
+pub struct StagedAssembly {
+    #[cfg(feature = "api")]
+    pub api_hub: Option<Arc<ApiHub>>,
+    pub runtime: Arc<plugin::PluginRuntime>,
+    pub config: Config,
+}
+
+/// Build a candidate assembly without touching process globals beyond the
+/// staged metric parking: the candidate plugin runtime initializes (binding
+/// its listeners for SO_REUSEPORT overlap on Unix) while the previous
+/// generation keeps serving.
+///
+/// On failure the candidate is destroyed and the caller's live assembly is
+/// untouched; metric staging is aborted.
+pub async fn prepare_assembly(
+    config: &Config,
+    controller: Option<Arc<AppController>>,
+) -> Result<StagedAssembly> {
+    crate::infra::network::metrics::init()?;
+
+    #[cfg(feature = "api")]
+    let api_hub = ApiHub::from_config(&config.api)?;
+    #[cfg(not(feature = "api"))]
+    if config.api.http.is_some() {
+        tracing::warn!(
+            "api.http is configured but this build was compiled without the `api` feature; \
+             the management API (health / control / logs / config endpoints) will not start. \
+             Rebuild with --features api to enable it, or remove the api block to silence this warning."
+        );
+    }
+
+    if let Some(controller) = &controller {
+        plugin::set_app_controller(controller.clone());
+    } else {
+        plugin::clear_app_controller();
+    }
+
+    let runtime = match plugin::stage_runtime(config.clone()).await {
+        Ok(runtime) => runtime,
+        Err(err) => {
+            // The controller only belongs to a caller that had none (fresh
+            // startup); a reload shares it with the still-serving assembly.
+            if controller.is_none() {
+                plugin::clear_app_controller();
+            }
+            return Err(err);
+        }
+    };
+
+    Ok(StagedAssembly {
+        #[cfg(feature = "api")]
+        api_hub,
+        runtime,
+        config: config.clone(),
+    })
+}
+
+/// Publish a staged assembly: commit the runtime (outbound profiles + global
+/// pointer + staged metrics) and bring the management API up. The previous
+/// generation must already be stopped.
+pub async fn activate_assembly(
+    staged: StagedAssembly,
+    controller: Option<Arc<AppController>>,
+) -> Result<AppAssembly> {
+    let StagedAssembly {
+        #[cfg(feature = "api")]
+        api_hub,
+        runtime,
+        config,
+    } = staged;
+
+    let runtime = match plugin::commit_staged_runtime(runtime, &config).await {
+        Ok(runtime) => runtime,
+        Err(err) => {
+            plugin::clear_app_controller();
+            return Err(err);
+        }
+    };
+
+    #[cfg(feature = "api")]
+    if let Some(api_hub) = &api_hub {
+        install_global_api(api_hub.clone());
+        let activated = async {
+            api::register_builtin_routes()?;
+            if let Some(controller) = &controller {
+                api::register_control_routes(controller.clone())?;
+            }
+            let register = ApiRegister::new(api_hub.clone());
+            api::register_plugin_runtime_control_routes(&register, &runtime)?;
+            api_hub.mark_plugins_initialized(runtime.plugin_count(), runtime.server_plugin_count());
+            api_hub.start().await
+        };
+        if let Err(err) = activated.await {
+            plugin::destroy_runtime().await;
+            clear_global_api();
+            plugin::clear_app_controller();
+            return Err(err);
+        }
+    } else {
+        #[cfg(feature = "api")]
+        clear_global_api();
+    }
+    #[cfg(not(feature = "api"))]
+    {
+        let _ = runtime;
+        let _ = controller;
+    }
+
+    Ok(AppAssembly {
+        #[cfg(feature = "api")]
+        api_hub,
+    })
+}
+
+/// Tear down one live generation without the process-wide task cleanup:
+/// used at the staged-reload swap point, where the candidate's background
+/// tasks coexist with the old generation's until the old one is destroyed.
+/// Full shutdowns should use [`stop_application`].
+pub async fn stop(assembly: &AppAssembly) {
+    #[cfg(feature = "api")]
+    {
+        clear_global_api();
+        if let Some(api_hub) = &assembly.api_hub {
+            api_hub.stop().await;
+        }
+    }
+    #[cfg(not(feature = "api"))]
+    let _ = assembly;
+    plugin::destroy_runtime().await;
+    plugin::clear_app_controller();
+}
+
 /// Stop the management API, destroy plugins, and clean up background tasks.
 pub async fn stop_application(assembly: &AppAssembly) {
     #[cfg(feature = "api")]
