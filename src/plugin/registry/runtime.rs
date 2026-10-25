@@ -121,8 +121,7 @@ impl PluginRuntimeManager {
         candidate.load_catalog(try_global_catalog()?);
         let candidate = Arc::new(candidate);
 
-        let matcher_runtime_controls_enabled =
-            cfg!(feature = "api") && config.api.http.is_some();
+        let matcher_runtime_controls_enabled = cfg!(feature = "api") && config.api.http.is_some();
         if let Err(err) = candidate
             .clone()
             .init_plugins_with_runtime_controls(config.plugins, matcher_runtime_controls_enabled)
@@ -138,6 +137,69 @@ impl PluginRuntimeManager {
     fn install_runtime(&self, candidate: Arc<PluginRuntime>) -> Arc<PluginRuntime> {
         write_rwlock(&self.current).replace(candidate.clone());
         candidate
+    }
+
+    /// Build a candidate runtime without retiring the current one or
+    /// touching process globals (staged reload, design PR-B).
+    ///
+    /// Metric registrations are parked in the staging list so the old
+    /// generation keeps serving `/metrics` and its destroy-time
+    /// unregistrations cannot remove the candidate's entries. Outbound
+    /// profiles are NOT swapped here; candidate plugins that dial during
+    /// init see the previous generation's profiles until commit.
+    pub async fn stage_runtime(self: &Arc<Self>, config: Config) -> Result<Arc<PluginRuntime>> {
+        crate::infra::observability::metrics::begin_metric_staging();
+        let lifecycle_guard = self.lifecycle.clone().lock_owned().await;
+        let manager = self.clone();
+        let result = tokio::spawn(async move {
+            let _lifecycle_guard = lifecycle_guard;
+            // Fresh start: outbound profiles must exist before plugins dial at
+            // init (download executor, probes). On reload the old profiles
+            // stay live for the old generation until commit; the candidate's
+            // init-time dials see the previous profiles as a documented
+            // staged-reload tradeoff.
+            let fresh_start = manager.current_runtime().is_none();
+            if fresh_start {
+                manager.install_outbound_profiles(&config)?;
+            }
+            let built = manager.build_registry(config, None).await;
+            if built.is_ok() {
+                // Publish staged metrics before the old generation is
+                // destroyed so its unregistrations remove the oldest
+                // same-tag entries (its own) and keep the candidate's.
+                crate::infra::observability::metrics::flush_metric_staging();
+            }
+            built
+        })
+        .await
+        .map_err(|error| DnsError::runtime(format!("runtime staging task failed: {error}")))?;
+        match result {
+            Ok(candidate) => Ok(candidate),
+            Err(err) => {
+                crate::infra::observability::metrics::abort_metric_staging();
+                Err(err)
+            }
+        }
+    }
+
+    /// Commit a staged runtime: swap outbound profiles (reload case) and
+    /// publish the candidate as current. The previous generation must
+    /// already be destroyed.
+    pub async fn commit_staged_runtime(
+        self: &Arc<Self>,
+        candidate: Arc<PluginRuntime>,
+        config: Config,
+    ) -> Result<Arc<PluginRuntime>> {
+        let lifecycle_guard = self.lifecycle.clone().lock_owned().await;
+        let manager = self.clone();
+        tokio::spawn(async move {
+            let _lifecycle_guard = lifecycle_guard;
+            manager.install_outbound_profiles(&config)?;
+            let published = manager.install_runtime(candidate);
+            Ok::<Arc<PluginRuntime>, DnsError>(published)
+        })
+        .await
+        .map_err(|error| DnsError::runtime(format!("runtime commit task failed: {error}")))?
     }
 
     pub async fn destroy_runtime(self: &Arc<Self>) {
@@ -240,6 +302,22 @@ pub async fn init(config: Config) -> Result<Arc<PluginRuntime>> {
 
 pub async fn destroy_runtime() {
     global_manager().destroy_runtime().await;
+}
+
+/// Build a staged candidate runtime while the current one keeps serving
+/// (staged reload). See `PluginRuntimeManager::stage_runtime`.
+pub async fn stage_runtime(config: Config) -> Result<Arc<PluginRuntime>> {
+    global_manager().stage_runtime(config).await
+}
+
+/// Commit a staged runtime after the previous generation is destroyed.
+pub async fn commit_staged_runtime(
+    candidate: Arc<PluginRuntime>,
+    config: &Config,
+) -> Result<Arc<PluginRuntime>> {
+    global_manager()
+        .commit_staged_runtime(candidate, config.clone())
+        .await
 }
 
 pub fn set_app_controller(controller: Arc<AppController>) {

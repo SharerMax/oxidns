@@ -18,27 +18,39 @@ pub struct AppAssembly {
     pub api_hub: Option<Arc<ApiHub>>,
 }
 
+/// A candidate assembly built by [`prepare_assembly`] while the previous
+/// generation still serves. Activated into a live [`AppAssembly`] by
+/// [`activate_assembly`] once the previous generation has been stopped.
+pub struct StagedAssembly {
+    #[cfg(feature = "api")]
+    pub api_hub: Option<Arc<ApiHub>>,
+    pub runtime: Arc<plugin::PluginRuntime>,
+    pub config: Config,
+}
+
 pub async fn assemble(
     config: &Config,
     controller: Option<Arc<AppController>>,
 ) -> Result<AppAssembly> {
+    let staged = prepare_assembly(config, controller.clone()).await?;
+    activate_assembly(staged, controller).await
+}
+
+/// Build a candidate assembly without touching process globals beyond the
+/// staged metric parking: the candidate plugin runtime initializes (binding
+/// its listeners for SO_REUSEPORT overlap on Unix) while the previous
+/// generation keeps serving.
+///
+/// On failure the candidate is destroyed and the caller's live assembly is
+/// untouched; metric staging is aborted.
+pub async fn prepare_assembly(
+    config: &Config,
+    controller: Option<Arc<AppController>>,
+) -> Result<StagedAssembly> {
     crate::infra::network::metrics::init()?;
 
     #[cfg(feature = "api")]
     let api_hub = ApiHub::from_config(&config.api)?;
-    #[cfg(feature = "api")]
-    if let Some(api_hub) = &api_hub {
-        install_global_api(api_hub.clone());
-        api::register_builtin_routes()?;
-        if let Some(controller) = &controller {
-            api::register_control_routes(controller.clone())?;
-        }
-    } else {
-        clear_global_api();
-    }
-    // A version/feature mismatch that does not stop the server from running:
-    // DNS forwarding works fine without the management API, so warn loudly and
-    // carry on instead of failing startup.
     #[cfg(not(feature = "api"))]
     if config.api.http.is_some() {
         tracing::warn!(
@@ -54,11 +66,43 @@ pub async fn assemble(
         plugin::clear_app_controller();
     }
 
-    let runtime = match plugin::init(config.clone()).await {
+    let runtime = match plugin::stage_runtime(config.clone()).await {
         Ok(runtime) => runtime,
         Err(err) => {
-            #[cfg(feature = "api")]
-            clear_global_api();
+            // The controller only belongs to a caller that had none (fresh
+            // startup); a reload shares it with the still-serving assembly.
+            if controller.is_none() {
+                plugin::clear_app_controller();
+            }
+            return Err(err);
+        }
+    };
+
+    Ok(StagedAssembly {
+        #[cfg(feature = "api")]
+        api_hub,
+        runtime,
+        config: config.clone(),
+    })
+}
+
+/// Publish a staged assembly: commit the runtime (outbound profiles + global
+/// pointer + staged metrics) and bring the management API up. The previous
+/// generation must already be stopped.
+pub async fn activate_assembly(
+    staged: StagedAssembly,
+    controller: Option<Arc<AppController>>,
+) -> Result<AppAssembly> {
+    let StagedAssembly {
+        #[cfg(feature = "api")]
+        api_hub,
+        runtime,
+        config,
+    } = staged;
+
+    let runtime = match plugin::commit_staged_runtime(runtime, &config).await {
+        Ok(runtime) => runtime,
+        Err(err) => {
             plugin::clear_app_controller();
             return Err(err);
         }
@@ -66,24 +110,31 @@ pub async fn assemble(
 
     #[cfg(feature = "api")]
     if let Some(api_hub) = &api_hub {
-        let register = ApiRegister::new(api_hub.clone());
-        if let Err(err) = api::register_plugin_runtime_control_routes(&register, &runtime) {
+        install_global_api(api_hub.clone());
+        let activated = async {
+            api::register_builtin_routes()?;
+            if let Some(controller) = &controller {
+                api::register_control_routes(controller.clone())?;
+            }
+            let register = ApiRegister::new(api_hub.clone());
+            api::register_plugin_runtime_control_routes(&register, &runtime)?;
+            api_hub.mark_plugins_initialized(runtime.plugin_count(), runtime.server_plugin_count());
+            api_hub.start().await
+        };
+        if let Err(err) = activated.await {
             plugin::destroy_runtime().await;
             clear_global_api();
             plugin::clear_app_controller();
             return Err(err);
         }
-        api_hub.mark_plugins_initialized(runtime.plugin_count(), runtime.server_plugin_count());
-        if let Err(err) = api_hub.start().await {
-            plugin::destroy_runtime().await;
-            clear_global_api();
-            plugin::clear_app_controller();
-            return Err(err);
-        }
+    } else {
+        #[cfg(feature = "api")]
+        clear_global_api();
     }
     #[cfg(not(feature = "api"))]
     {
         let _ = runtime;
+        let _ = controller;
     }
 
     Ok(AppAssembly {

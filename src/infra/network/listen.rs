@@ -90,6 +90,11 @@ fn build_listen_socket(
     }
     let _ = sock.set_nonblocking(true);
     let _ = sock.set_reuse_address(true);
+    // Match the TCP listener: allow a staged reload's candidate listeners to
+    // dual-bind the port (Linux SO_REUSEPORT) while the old generation still
+    // serves, so reloads keep the port continuously available.
+    #[cfg(unix)]
+    let _ = sock.set_reuse_port(true);
 
     Ok(sock)
 }
