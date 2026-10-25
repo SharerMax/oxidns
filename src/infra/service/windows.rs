@@ -52,6 +52,9 @@ pub fn try_dispatch_windows_service() -> Result<bool> {
 fn windows_service_entry(_args: Vec<OsString>) {
     if let Err(e) = run_windows_service() {
         eprintln!("OxiDNS service error: {e}");
+        // Exit uncleanly so the configured SCM failure-recovery action
+        // restarts the service instead of treating it as a clean stop.
+        std::process::exit(1);
     }
 }
 
