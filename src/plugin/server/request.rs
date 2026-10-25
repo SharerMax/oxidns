@@ -74,6 +74,31 @@ impl RequestHandle {
             };
         }
 
+        // RFC 6891 6.1.3: an OPT with an unsupported EDNS version must be
+        // answered with BADVERS instead of executing the query.
+        if context
+            .request
+            .edns()
+            .as_ref()
+            .is_some_and(|edns| edns.version() > 0)
+        {
+            debug!(
+                "Refusing unsupported EDNS version from {}, id {}",
+                src_addr,
+                context.request.id()
+            );
+            let mut response = context.request.response(Rcode::BADVERS);
+            Self::finalize_response(&context.request, &mut response);
+            if let (Some(metrics), Some(start_ms)) = (self.metrics.as_ref(), metrics_start) {
+                metrics.on_request_finish(start_ms, RequestExit::Controlled);
+            }
+            return RequestResult {
+                request: context.request,
+                response,
+                exit: RequestExit::Controlled,
+            };
+        }
+
         if event_enabled!(Level::DEBUG) {
             debug!(
                 "DNS request from {}, queries: {:?}, id: {}, edns: {:?}, nameservers: {:?}",
@@ -312,6 +337,43 @@ mod tests {
                 .expect("meta capture lock should not be poisoned")
                 .is_none(),
             "pipeline must not run for non-query ingress"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handle_request_answers_badvers_for_unsupported_edns_version() {
+        let observed = Arc::new(Mutex::new(None));
+        let request_handle = make_request_handle(Arc::new(CaptureMetaExecutor {
+            observed: observed.clone(),
+        }));
+        let mut request = make_request(22, "example.com.");
+        request.set_edns(crate::proto::rdata::Edns::new_with_param(
+            1232,
+            0,
+            1,
+            Default::default(),
+            Vec::new(),
+        ));
+
+        let result = request_handle
+            .handle_request(
+                request,
+                SocketAddr::from(([127, 0, 0, 1], 5303)),
+                RequestMeta {
+                    server_name: None,
+                    url_path: None,
+                },
+            )
+            .await;
+
+        assert_eq!(result.response.rcode(), Rcode::BADVERS);
+        assert!(result.response.edns().is_some(), "BADVERS requires an OPT");
+        assert!(
+            observed
+                .lock()
+                .expect("meta capture lock should not be poisoned")
+                .is_none(),
+            "pipeline must not run for unsupported EDNS versions"
         );
     }
 
