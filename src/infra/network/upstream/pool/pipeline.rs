@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
-use tokio::sync::Notify;
+use tokio::sync::OwnedSemaphorePermit;
 use tracing::{debug, warn};
 
 use crate::infra::clock::AppClock;
@@ -16,7 +16,7 @@ use crate::infra::error::Result;
 use crate::infra::network::upstream::config::ConnectionInfo;
 use crate::infra::network::upstream::pool::{
     Connection, ConnectionBuilder, ConnectionPool, DeadlineOutcome, ManagedMaintenanceTask,
-    PoolSize, QueryDeadline, QueryTimeoutPolicy, start_maintenance,
+    PoolCapacity, PoolSize, QueryDeadline, QueryTimeoutPolicy, start_maintenance,
 };
 use crate::infra::task as task_center;
 use crate::proto::Message;
@@ -52,8 +52,11 @@ pub struct PipelinePool<C: Connection> {
     connect_timeout: Duration,
     /// Monotonic connection id source.
     next_id: AtomicU16,
-    /// Notify waiters when a slot is released, inserted, retired, or closed.
-    release_notified: Notify,
+    /// Pool-level load capacity: one permit per unit of per-slot load.
+    /// `add_permits(max_load)` when a slot joins; each lease holds the permit
+    /// for its in-flight unit and returns it on release, so capacity waiters
+    /// are woken by construction.
+    capacity: PoolCapacity,
     /// Background maintenance task registered in task center.
     maintenance_task_handle: Mutex<Option<task_center::ManagedTaskHandle>>,
 }
@@ -139,7 +142,6 @@ impl<C: Connection> ConnectionPool<C> for PipelinePool<C> {
             for slot in close_after_swap {
                 slot.close();
             }
-            self.release_notified.notify_waiters();
             return;
         }
 
@@ -157,7 +159,6 @@ impl<C: Connection> ConnectionPool<C> for PipelinePool<C> {
                 active_slots = new_len,
                 "Pipeline pool maintenance removed connections"
             );
-            self.release_notified.notify_waiters();
         }
 
         if new_len < self.min_size {
@@ -207,7 +208,7 @@ impl<C: Connection> PipelinePool<C> {
             timeout_policy,
             connect_timeout,
             next_id: AtomicU16::new(1),
-            release_notified: Notify::new(),
+            capacity: PoolCapacity::new(0),
             maintenance_task_handle: Mutex::new(None),
         });
         start_maintenance(&pool);
@@ -224,68 +225,55 @@ impl<C: Connection> PipelinePool<C> {
 
     async fn acquire(&self, deadline: QueryDeadline) -> Result<PipelineLease<'_, C>> {
         loop {
+            let permit = match self.capacity.try_acquire_owned() {
+                Some(permit) => permit,
+                None => {
+                    // No free load unit right now. A pool with no usable
+                    // slots has no capacity at all yet (cold start, or every
+                    // slot retired): create one to contribute its budget.
+                    if self.usable_or_inflight_slot_count() == 0
+                        && let Some(reservation) = self.try_reserve_slot()
+                        && self.expand_one(reservation, deadline).await?.is_some()
+                    {
+                        continue;
+                    }
+                    // Saturated: block for a load unit. Lease releases return
+                    // permits and wake this wait by construction.
+                    match deadline.run(self.capacity.acquire_owned()).await {
+                        DeadlineOutcome::Completed(permit) => permit,
+                        DeadlineOutcome::Expired => return Err(deadline.timeout_error()),
+                    }
+                }
+            };
+
+            // Permit in hand: find a slot with room.
             if let Some(slot) = self.try_acquire_existing() {
-                return Ok(PipelineLease::new(slot, &self.release_notified));
+                return Ok(PipelineLease::new(slot, permit));
             }
 
+            // No room despite the permit (scan race, or phantom capacity left
+            // by retired/closed slots). Materialize room with a new slot if
+            // the slot-count cap allows; otherwise hand the permit back and
+            // retry after the backoff — a real release re-issues it with room.
             if let Some(reservation) = self.try_reserve_slot() {
                 match self.expand_one(reservation, deadline).await {
                     Ok(Some(slot)) => {
                         if slot.try_acquire(self.max_load) {
-                            return Ok(PipelineLease::new(slot, &self.release_notified));
+                            return Ok(PipelineLease::new(slot, permit));
                         }
-                        self.release_notified.notify_waiters();
                     }
-                    Ok(None) => {
-                        self.wait_backoff(deadline).await?;
-                    }
+                    Ok(None) => {}
                     Err(e) => {
                         if deadline.remaining().is_none() {
+                            drop(permit);
                             return Err(deadline.timeout_error());
                         }
                         debug!("Failed to create pipeline-pool connection: {:?}", e);
-                        self.wait_backoff(deadline).await?;
                     }
-                }
-            } else {
-                // Pool is saturated. Register as a waiter *before* the final
-                // re-check so a slot released between the checks above and the
-                // await is not lost: `enable()` claims any stored `notify_one`
-                // permit, and once registered we are guaranteed to observe a
-                // later `notify_waiters` from a close/retire/expand event.
-                let notified = self.release_notified.notified();
-                tokio::pin!(notified);
-                notified.as_mut().enable();
-                if let Some(slot) = self.try_acquire_existing() {
-                    return Ok(PipelineLease::new(slot, &self.release_notified));
-                }
-                if let Some(reservation) = self.try_reserve_slot() {
-                    match self.expand_one(reservation, deadline).await {
-                        Ok(Some(slot)) => {
-                            if slot.try_acquire(self.max_load) {
-                                return Ok(PipelineLease::new(slot, &self.release_notified));
-                            }
-                            self.release_notified.notify_waiters();
-                        }
-                        Ok(None) => {
-                            self.wait_backoff(deadline).await?;
-                            continue;
-                        }
-                        Err(e) => {
-                            if deadline.remaining().is_none() {
-                                return Err(deadline.timeout_error());
-                            }
-                            debug!("Failed to create pipeline-pool connection: {:?}", e);
-                            self.wait_backoff(deadline).await?;
-                            continue;
-                        }
-                    }
-                }
-                match deadline.run(notified.as_mut()).await {
-                    DeadlineOutcome::Completed(()) => {}
-                    DeadlineOutcome::Expired => return Err(deadline.timeout_error()),
                 }
             }
+            drop(permit);
+            self.wait_backoff(deadline).await?;
         }
     }
 
@@ -349,12 +337,14 @@ impl<C: Connection> PipelinePool<C> {
                 let slot = Arc::new(PipelineSlot::new(conn));
                 if self.insert_slot(slot.clone()) {
                     reservation.commit();
+                    // The new slot contributes its full load budget as pool
+                    // capacity; wake capacity waiters through the semaphore.
+                    self.capacity.add_permits(usize::from(self.max_load));
                     debug!(
                         "Pipeline pool expanded: total={}/{}",
                         self.slots.load().len(),
                         self.max_size
                     );
-                    self.release_notified.notify_waiters();
                     Ok(Some(slot))
                 } else {
                     slot.close();
@@ -433,7 +423,6 @@ impl<C: Connection> PipelinePool<C> {
             &slots,
             &self.slots.compare_and_swap(&slots, Arc::new(pruned)),
         ) {
-            self.release_notified.notify_waiters();
             pruned_len
         } else {
             self.slots
@@ -512,22 +501,6 @@ impl<C: Connection> PipelineSlot<C> {
         }
     }
 
-    fn release(&self, notify: &Notify) {
-        let previous = self.inflight.fetch_sub(1, Ordering::AcqRel);
-        debug_assert!(previous > 0, "pipeline slot inflight underflow");
-        if previous == 1 && self.state() != SLOT_ACTIVE {
-            self.close();
-        }
-        // Releasing one in-flight query frees exactly one unit of load on
-        // this slot. `notify_one` covers a waiter that has enabled its
-        // notified future but not parked yet; `notify_waiters` is still
-        // required because consecutive `notify_one` calls collapse into a
-        // single stored permit, which can strand an already-parked waiter
-        // despite free capacity.
-        notify.notify_one();
-        notify.notify_waiters();
-    }
-
     fn release_without_notify(&self) {
         let previous = self.inflight.fetch_sub(1, Ordering::AcqRel);
         debug_assert!(previous > 0, "pipeline slot inflight underflow");
@@ -584,12 +557,19 @@ impl<C: Connection> PipelineSlot<C> {
 
 struct PipelineLease<'a, C: Connection> {
     slot: Arc<PipelineSlot<C>>,
-    notify: &'a Notify,
+    /// Load-unit permit held for the lease's duration; dropping it (with the
+    /// lease) returns the capacity and wakes a waiter.
+    _permit: OwnedSemaphorePermit,
+    _pool: std::marker::PhantomData<&'a PipelinePool<C>>,
 }
 
 impl<'a, C: Connection> PipelineLease<'a, C> {
-    fn new(slot: Arc<PipelineSlot<C>>, notify: &'a Notify) -> Self {
-        Self { slot, notify }
+    fn new(slot: Arc<PipelineSlot<C>>, permit: OwnedSemaphorePermit) -> Self {
+        Self {
+            slot,
+            _permit: permit,
+            _pool: std::marker::PhantomData,
+        }
     }
 
     fn connection(&self) -> &C {
@@ -598,18 +578,18 @@ impl<'a, C: Connection> PipelineLease<'a, C> {
 
     fn retire(&self) {
         self.slot.retire();
-        self.notify.notify_waiters();
     }
 
     fn close(&self) {
         self.slot.close();
-        self.notify.notify_waiters();
     }
 }
 
 impl<C: Connection> Drop for PipelineLease<'_, C> {
     fn drop(&mut self) {
-        self.slot.release(self.notify);
+        // In-flight bookkeeping first; the permit drops with the lease and
+        // returns the load unit to the pool, waking a capacity waiter.
+        self.slot.release_without_notify();
     }
 }
 
@@ -633,7 +613,6 @@ impl<C: Connection> Drop for SlotReservation<'_, C> {
     fn drop(&mut self) {
         if self.active {
             self.pool.reserved_slots.fetch_sub(1, Ordering::Release);
-            self.pool.release_notified.notify_waiters();
         }
     }
 }
@@ -769,10 +748,14 @@ mod tests {
         initial_connections: Vec<Arc<MockConnection>>,
     ) -> PipelinePool<MockConnection> {
         AppClock::start();
+        let max_load = max_load.max(1);
         let slots = initial_connections
             .into_iter()
             .map(|conn| Arc::new(PipelineSlot::new(conn)))
-            .collect();
+            .collect::<Vec<_>>();
+        // Seeding slots outside insert_slot must contribute their load
+        // budget to pool capacity, matching production accounting.
+        let capacity = PoolCapacity::new(slots.len() * usize::from(max_load));
         PipelinePool {
             connection_info: Arc::new(ConnectionInfo::with_addr("udp://127.0.0.1:53").unwrap()),
             index: AtomicUsize::new(0),
@@ -780,13 +763,13 @@ mod tests {
             reserved_slots: AtomicUsize::new(0),
             max_size,
             min_size,
-            max_load: max_load.max(1),
+            max_load,
             max_idle: Duration::from_secs(idle_secs),
             connection_builder: Box::new(builder),
             timeout_policy: QueryTimeoutPolicy::Retire,
             connect_timeout: Duration::from_secs(5),
             next_id: AtomicU16::new(1),
-            release_notified: Notify::new(),
+            capacity,
             maintenance_task_handle: Mutex::new(None),
         }
     }
