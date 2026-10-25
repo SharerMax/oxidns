@@ -39,6 +39,7 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::yield_now;
 
 use crate::infra::error::Result;
@@ -165,6 +166,53 @@ pub trait ManagedMaintenanceTask {
 /// Maintenance interval for pool cleanup
 const MAINTENANCE_DURATION: Duration = Duration::from_secs(10);
 
+/// Semaphore-backed capacity gate shared by pool implementations.
+///
+/// One permit = the right to keep one connection out of the pool's idle
+/// queue (in use or being created). Returning a connection to idle gives
+/// its permit back, which wakes capacity waiters by construction, so pools
+/// need no manual notify choreography and wakeup loss is impossible.
+///
+/// The close/retire surface (`begin_retire`) arrives with the PipelinePool
+/// migration; ReusePool pools live until dropped and never close capacity
+/// early.
+#[derive(Debug)]
+pub(crate) struct PoolCapacity {
+    semaphore: Arc<Semaphore>,
+    total: usize,
+}
+
+impl PoolCapacity {
+    pub(crate) fn new(total_permits: usize) -> Self {
+        Self {
+            semaphore: Arc::new(Semaphore::new(total_permits)),
+            total: total_permits,
+        }
+    }
+
+    /// Acquire one permit, waiting while the pool is at capacity.
+    ///
+    /// Cancellation-safe: dropping the future loses no permit; dropping the
+    /// returned permit returns the capacity.
+    pub(crate) async fn acquire_owned(&self) -> OwnedSemaphorePermit {
+        self.semaphore
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("pool capacity semaphore is never closed")
+    }
+
+    /// Non-blocking acquire for background expansion and prefill.
+    pub(crate) fn try_acquire_owned(&self) -> Option<OwnedSemaphorePermit> {
+        self.semaphore.clone().try_acquire_owned().ok()
+    }
+
+    /// Permits currently held (connections in use or being created).
+    pub(crate) fn held(&self) -> usize {
+        self.total - self.semaphore.available_permits()
+    }
+}
+
 /// Start background maintenance task for a connection pool
 ///
 /// Periodically calls `maintain()` to clean up idle/dead connections.
@@ -234,5 +282,56 @@ mod tests {
             .await;
 
         assert!(matches!(outcome, DeadlineOutcome::Expired));
+    }
+
+    #[tokio::test]
+    async fn pool_capacity_blocks_at_limit_and_wakes_on_drop() {
+        let capacity = Arc::new(PoolCapacity::new(2));
+        let first = capacity.acquire_owned().await;
+        let second = capacity.acquire_owned().await;
+        assert_eq!(capacity.held(), 2);
+        assert!(capacity.try_acquire_owned().is_none());
+
+        // Releasing one permit must wake a blocked acquirer.
+        drop(first);
+        let waiter = {
+            let capacity = capacity.clone();
+            tokio::spawn(async move {
+                let _permit = capacity.acquire_owned().await;
+            })
+        };
+        tokio::time::timeout(Duration::from_millis(100), waiter)
+            .await
+            .expect("dropped permit should wake the blocked acquirer")
+            .expect("join should succeed");
+        drop(second);
+        assert_eq!(capacity.held(), 0);
+    }
+
+    #[tokio::test]
+    async fn pool_capacity_cancelled_acquire_leaks_nothing() {
+        let capacity = Arc::new(PoolCapacity::new(1));
+        let permit = capacity.acquire_owned().await;
+
+        let cancelled = {
+            let capacity = capacity.clone();
+            tokio::spawn(async move {
+                let _permit = capacity.acquire_owned().await;
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        cancelled.abort();
+        // Ensure the aborted task dropped its acquire future before
+        // asserting on capacity accounting.
+        let _ = cancelled.await;
+
+        drop(permit);
+        assert_eq!(capacity.held(), 0);
+        // Capacity is fully returned after the aborted waiter is gone.
+        let reacquired = tokio::time::timeout(Duration::from_millis(50), capacity.acquire_owned())
+            .await
+            .expect("capacity should be reusable after abort + drop");
+        drop(reacquired);
+        assert_eq!(capacity.held(), 0);
     }
 }

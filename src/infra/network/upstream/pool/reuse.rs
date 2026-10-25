@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::fmt::Debug;
-use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use crossbeam_queue::ArrayQueue;
-use tokio::sync::Notify;
+use tokio::sync::OwnedSemaphorePermit;
 use tracing::{debug, info, warn};
 
 use crate::infra::clock::AppClock;
@@ -16,7 +16,7 @@ use crate::infra::error::Result;
 use crate::infra::network::upstream::config::{ConnectionInfo, ConnectionType};
 use crate::infra::network::upstream::pool::{
     Connection, ConnectionBuilder, ConnectionPool, DeadlineOutcome, ManagedMaintenanceTask,
-    PoolSize, QueryDeadline, QueryTimeoutPolicy, start_maintenance,
+    PoolCapacity, PoolSize, QueryDeadline, QueryTimeoutPolicy, start_maintenance,
 };
 use crate::infra::task as task_center;
 use crate::proto::Message;
@@ -41,8 +41,9 @@ pub struct ReusePool<C: Connection> {
     transport: ConnectionType,
     /// Queue holding idle connections
     connections: ArrayQueue<Arc<C>>,
-    /// Number of active connections in use or queued
-    active_count: AtomicUsize,
+    /// Borrow capacity: one permit per connection held out of the idle queue
+    /// (in use or being created), bounded by `max_size`.
+    capacity: PoolCapacity,
     /// Maximum number of connections allowed
     max_size: usize,
     /// Minimum number of connections to keep alive
@@ -57,8 +58,6 @@ pub struct ReusePool<C: Connection> {
     connect_timeout: Duration,
     /// Monotonic increasing connection id
     next_id: AtomicU16,
-    /// Notify waiting threads when a connection becomes available
-    release_notified: Notify,
     /// Background maintenance task registered in task center.
     maintenance_task_handle: Mutex<Option<task_center::ManagedTaskHandle>>,
 }
@@ -111,14 +110,13 @@ impl<C: Connection> ConnectionPool<C> for ReusePool<C> {
 
         let check_count = self.connections.len();
         if check_count == 0 {
-            if self.active_count.load(Ordering::Relaxed) < self.min_size {
+            if self.total_connections() < self.min_size {
                 debug!("Reuse pool expanding to maintain minimum size");
                 let _ = self.expand(QueryDeadline::new(self.connect_timeout)).await;
             }
             return;
         }
 
-        let mut requeued = false;
         for _ in 0..check_count {
             if let Some(conn) = self.connections.pop() {
                 if conn.available() {
@@ -127,44 +125,31 @@ impl<C: Connection> ConnectionPool<C> for ReusePool<C> {
                         // still valid
                         if let Err(conn) = self.connections.push(conn) {
                             drop_vec.push(conn);
-                            self.active_count.fetch_sub(1, Ordering::Relaxed);
-                        } else {
-                            requeued = true;
                         }
                     } else {
                         // idle timeout
                         drop_vec.push(conn);
-                        self.active_count.fetch_sub(1, Ordering::Relaxed);
                     }
                 } else {
                     debug!("Dropping invalid connection");
                     invalid_vec.push(conn);
-                    self.active_count.fetch_sub(1, Ordering::Relaxed);
                 }
             } else {
                 break;
             }
         }
 
-        // Maintain minimum connection count
-        while self.active_count.load(Ordering::Relaxed) < self.min_size {
-            if !drop_vec.is_empty() {
-                if let Err(conn) = self.connections.push(drop_vec.pop().unwrap()) {
+        // Maintain minimum connection count. Idle connections carry no
+        // borrow permit, so eviction and re-queueing move no capacity.
+        while self.total_connections() < self.min_size {
+            if let Some(conn) = drop_vec.pop() {
+                if let Err(conn) = self.connections.push(conn) {
                     drop_vec.push(conn);
                     break;
-                } else {
-                    self.active_count.fetch_add(1, Ordering::Relaxed);
-                    requeued = true;
                 }
             } else {
                 break;
             }
-        }
-
-        // A waiter can park against an empty queue while maintain holds the
-        // popped connections; re-queued entries must wake it.
-        if requeued {
-            self.release_notified.notify_waiters();
         }
 
         // Close dropped/invalid connections
@@ -174,15 +159,15 @@ impl<C: Connection> ConnectionPool<C> for ReusePool<C> {
         // Log maintenance results if significant
         if !drop_vec.is_empty() || !invalid_vec.is_empty() {
             debug!(
-                "Reuse pool maintenance: dropped {} idle, {} invalid, {} active",
+                "Reuse pool maintenance: dropped {} idle, {} invalid, {} in use",
                 drop_vec.len(),
                 invalid_vec.len(),
-                self.active_count.load(Ordering::Relaxed)
+                self.capacity.held()
             );
         }
 
         // Expand if below min_size
-        if self.active_count.load(Ordering::Relaxed) < self.min_size {
+        if self.total_connections() < self.min_size {
             debug!("Reuse pool expanding to maintain minimum size");
             let _ = self.expand(QueryDeadline::new(self.connect_timeout)).await;
         }
@@ -224,15 +209,14 @@ impl<C: Connection> ReusePool<C> {
             connection_info,
             transport,
             connections: ArrayQueue::new(max_size),
+            capacity: PoolCapacity::new(max_size),
             min_size,
             max_size,
             connection_builder,
             timeout_policy,
             connect_timeout,
             max_idle: idle_time,
-            active_count: AtomicUsize::new(0),
             next_id: AtomicU16::new(1),
-            release_notified: Notify::new(),
             maintenance_task_handle: Mutex::new(None),
         });
 
@@ -250,189 +234,141 @@ impl<C: Connection> ReusePool<C> {
         pool
     }
 
-    /// Borrow a connection from the pool or create a new one if needed
+    /// Borrow a connection: acquire borrow capacity first, then reuse an
+    /// idle connection or create a new one.
+    ///
+    /// One permit keeps a connection out of the idle queue; returning the
+    /// connection to idle (or closing it) gives the permit back and wakes a
+    /// capacity waiter through the semaphore, so this is the pool's only
+    /// blocking wait and needs no notify choreography.
     async fn get(&self, deadline: QueryDeadline) -> Result<BorrowedConnection<'_, C>> {
         loop {
+            let permit = match deadline.run(self.capacity.acquire_owned()).await {
+                DeadlineOutcome::Completed(permit) => permit,
+                DeadlineOutcome::Expired => return Err(deadline.timeout_error()),
+            };
+
             if let Some(conn) = self.connections.pop() {
                 if conn.available() {
                     debug!("Reusing existing connection");
-                    return Ok(BorrowedConnection::new(self, conn));
-                } else {
-                    warn!("Detected unavailable connection, closing it");
-                    self.close_active_connection(conn);
+                    return Ok(BorrowedConnection::new(self, conn, permit));
                 }
+                warn!("Detected unavailable connection, closing it");
+                self.close_idle_connection(conn);
+                // Capacity is free again; retry with a fresh acquisition.
+                drop(permit);
+                continue;
             }
 
-            if let Some(reservation) = self.try_reserve_active() {
-                match self.create_reserved_connection(reservation, deadline).await {
-                    Ok(conn) => return Ok(BorrowedConnection::new(self, conn)),
-                    Err(e) => {
-                        if deadline.remaining().is_none() {
-                            return Err(deadline.timeout_error());
-                        }
-                        debug!("Failed to create reuse-pool connection: {:?}", e);
-                        self.wait_backoff(deadline).await?;
-                    }
+            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+            match deadline
+                .run(self.connection_builder.create_connection(
+                    id,
+                    deadline,
+                    self.connection_info.clone(),
+                ))
+                .await
+            {
+                DeadlineOutcome::Completed(Ok(conn)) => {
+                    return Ok(BorrowedConnection::new(self, conn, permit));
                 }
-            } else {
-                debug!("Pool is full, waiting for release...");
-                // Register as a waiter *before* the final re-check so a
-                // connection released between the check above and the await is
-                // not lost: `enable()` claims any stored `notify_one` permit,
-                // and once registered we will observe a later `notify_waiters`
-                // from a close that frees capacity.
-                let notified = self.release_notified.notified();
-                tokio::pin!(notified);
-                notified.as_mut().enable();
-                if let Some(conn) = self.connections.pop() {
-                    if conn.available() {
-                        debug!("Reusing existing connection");
-                        return Ok(BorrowedConnection::new(self, conn));
+                DeadlineOutcome::Completed(Err(e)) => {
+                    // A failed creation consumes no capacity; hand the permit
+                    // back and retry after a short backoff.
+                    drop(permit);
+                    if deadline.remaining().is_none() {
+                        return Err(deadline.timeout_error());
                     }
-                    warn!("Detected unavailable connection, closing it");
-                    self.close_active_connection(conn);
-                    continue;
+                    debug!("Failed to create reuse-pool connection: {:?}", e);
+                    self.wait_backoff(deadline).await?;
                 }
-                if let Some(reservation) = self.try_reserve_active() {
-                    match self.create_reserved_connection(reservation, deadline).await {
-                        Ok(conn) => return Ok(BorrowedConnection::new(self, conn)),
-                        Err(e) => {
-                            if deadline.remaining().is_none() {
-                                return Err(deadline.timeout_error());
-                            }
-                            debug!("Failed to create reuse-pool connection: {:?}", e);
-                            self.wait_backoff(deadline).await?;
-                            continue;
-                        }
-                    }
-                }
-                match deadline.run(notified.as_mut()).await {
-                    DeadlineOutcome::Completed(()) => {}
-                    DeadlineOutcome::Expired => return Err(deadline.timeout_error()),
+                DeadlineOutcome::Expired => {
+                    drop(permit);
+                    return Err(deadline.timeout_error());
                 }
             }
         }
     }
 
-    /// Return a connection back to the pool or close it if invalid
-    fn release(&self, conn: Arc<C>) {
+    /// Return a connection to the idle queue, closing it if invalid or the
+    /// queue is full. Capacity returns with the borrower's permit.
+    fn requeue_connection(&self, conn: Arc<C>) {
         if !conn.available() || self.connections.push(conn.clone()).is_err() {
             warn!("Releasing invalid or overflowed connection, closing it");
-            self.close_active_connection(conn);
+            conn.close();
         } else {
             debug!("Connection released back to pool");
-            // One stored permit can collapse across consecutive releases and
-            // strand a parked waiter despite free capacity; wake parked
-            // waiters as well.
-            self.release_notified.notify_one();
-            self.release_notified.notify_waiters();
         }
     }
 
-    fn close_active_connection(&self, conn: Arc<C>) {
+    /// Close a connection that came out of the idle queue (invalid or evicted
+    /// by maintenance). It holds no borrow permit, so no capacity moves.
+    fn close_idle_connection(&self, conn: Arc<C>) {
         conn.close();
-        self.active_count.fetch_sub(1, Ordering::Relaxed);
-        self.release_notified.notify_waiters();
     }
 
-    /// Expand pool by creating new connections up to desired size
+    /// Total connections in existence: idle plus those out of the queue.
+    fn total_connections(&self) -> usize {
+        self.connections.len() + self.capacity.held()
+    }
+
+    /// Expand pool by creating new idle connections up to the minimum size.
     async fn expand(&self, deadline: QueryDeadline) -> Result<()> {
-        let conns_len = self.active_count.load(Ordering::Relaxed);
-        if conns_len >= self.max_size {
-            debug!("Pool already at max capacity ({})", self.max_size);
-            return Ok(());
-        }
-
-        let mut want = if conns_len >= self.min_size {
-            1
-        } else {
-            self.min_size - conns_len
-        };
-        if conns_len + want > self.max_size {
-            want = self.max_size - conns_len;
-        }
+        let want = self.min_size.saturating_sub(self.total_connections());
         if want == 0 {
+            debug!(
+                "Pool already holds the minimum of {} connections",
+                self.min_size
+            );
             return Ok(());
         }
 
-        let mut created = Vec::with_capacity(want);
+        let mut created = 0usize;
         for _ in 0..want {
-            let Some(reservation) = self.try_reserve_active() else {
+            let Some(permit) = self.capacity.try_acquire_owned() else {
                 break;
             };
-            match self.create_reserved_connection(reservation, deadline).await {
-                Ok(conn) => {
+            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+            match deadline
+                .run(self.connection_builder.create_connection(
+                    id,
+                    deadline,
+                    self.connection_info.clone(),
+                ))
+                .await
+            {
+                DeadlineOutcome::Completed(Ok(conn)) => {
+                    // Push into the idle queue before returning the permit so
+                    // a woken acquirer always finds the connection.
                     if self.connections.push(conn.clone()).is_ok() {
-                        created.push(conn);
-                        self.release_notified.notify_one();
-                        self.release_notified.notify_waiters();
+                        created += 1;
                     } else {
                         debug!("Pool queue is full while expanding, closing new connection");
-                        self.close_active_connection(conn);
+                        conn.close();
                     }
+                    drop(permit);
                 }
-                Err(e) => {
+                DeadlineOutcome::Completed(Err(e)) => {
                     debug!("Failed to create new connection: {:?}", e);
+                    drop(permit);
                     if deadline.remaining().is_none() {
                         return Err(deadline.timeout_error());
                     }
                 }
+                DeadlineOutcome::Expired => return Err(deadline.timeout_error()),
             }
         }
 
-        let created_len = created.len();
-
-        if created_len > 0 {
+        if created > 0 {
             debug!(
                 "Reuse pool expanded: +{} connections (total={}/{})",
-                created_len,
-                self.active_count.load(Ordering::Relaxed),
+                created,
+                self.total_connections(),
                 self.max_size
             );
         }
 
         Ok(())
-    }
-
-    fn try_reserve_active(&self) -> Option<ActiveReservation<'_, C>> {
-        let mut current = self.active_count.load(Ordering::Acquire);
-        loop {
-            if current >= self.max_size {
-                return None;
-            }
-            match self.active_count.compare_exchange_weak(
-                current,
-                current + 1,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => return Some(ActiveReservation::new(self)),
-                Err(next) => current = next,
-            }
-        }
-    }
-
-    async fn create_reserved_connection(
-        &self,
-        reservation: ActiveReservation<'_, C>,
-        deadline: QueryDeadline,
-    ) -> Result<Arc<C>> {
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        match deadline
-            .run(self.connection_builder.create_connection(
-                id,
-                deadline,
-                self.connection_info.clone(),
-            ))
-            .await
-        {
-            DeadlineOutcome::Completed(Ok(conn)) => {
-                reservation.commit();
-                Ok(conn)
-            }
-            DeadlineOutcome::Completed(Err(e)) => Err(e),
-            DeadlineOutcome::Expired => Err(deadline.timeout_error()),
-        }
     }
 
     async fn wait_backoff(&self, deadline: QueryDeadline) -> Result<()> {
@@ -447,40 +383,20 @@ impl<C: Connection> ReusePool<C> {
     }
 }
 
-struct ActiveReservation<'a, C: Connection> {
-    pool: &'a ReusePool<C>,
-    active: bool,
-}
-
-impl<'a, C: Connection> ActiveReservation<'a, C> {
-    fn new(pool: &'a ReusePool<C>) -> Self {
-        Self { pool, active: true }
-    }
-
-    fn commit(mut self) {
-        self.active = false;
-    }
-}
-
-impl<C: Connection> Drop for ActiveReservation<'_, C> {
-    fn drop(&mut self) {
-        if self.active {
-            self.pool.active_count.fetch_sub(1, Ordering::Relaxed);
-            self.pool.release_notified.notify_waiters();
-        }
-    }
-}
-
 struct BorrowedConnection<'a, C: Connection> {
     pool: &'a ReusePool<C>,
     conn: Option<Arc<C>>,
+    /// Borrow capacity held for the duration of the query. Returned when the
+    /// connection goes back to the idle queue or closes.
+    permit: Option<OwnedSemaphorePermit>,
 }
 
 impl<'a, C: Connection> BorrowedConnection<'a, C> {
-    fn new(pool: &'a ReusePool<C>, conn: Arc<C>) -> Self {
+    fn new(pool: &'a ReusePool<C>, conn: Arc<C>, permit: OwnedSemaphorePermit) -> Self {
         Self {
             pool,
             conn: Some(conn),
+            permit: Some(permit),
         }
     }
 
@@ -492,14 +408,18 @@ impl<'a, C: Connection> BorrowedConnection<'a, C> {
 
     fn release(mut self) {
         if let Some(conn) = self.conn.take() {
-            self.pool.release(conn);
+            self.pool.requeue_connection(conn);
         }
+        // Return the borrow permit after the connection is visible in the
+        // idle queue so a woken acquirer always finds it.
+        drop(self.permit.take());
     }
 
     fn close(mut self) {
         if let Some(conn) = self.conn.take() {
-            self.pool.close_active_connection(conn);
+            conn.close();
         }
+        drop(self.permit.take());
     }
 }
 
@@ -517,13 +437,14 @@ impl<C: Connection> Drop for BorrowedConnection<'_, C> {
                 connection_type = std::any::type_name::<C>(),
                 connection_available = conn.available(),
                 inflight_queries = conn.using_count(),
-                pool_active_before_close = self.pool.active_count.load(Ordering::Relaxed),
+                pool_held_capacity = self.pool.capacity.held(),
                 pool_idle = self.pool.connections.len(),
                 pool_max = self.pool.max_size,
                 "Closing borrowed upstream connection after query cancellation or early drop"
             );
-            self.pool.close_active_connection(conn);
+            conn.close();
         }
+        drop(self.permit.take());
     }
 }
 
@@ -554,7 +475,7 @@ impl<C: Connection> Drop for ReusePool<C> {
 mod tests {
     use std::collections::VecDeque;
     use std::io;
-    use std::sync::atomic::{AtomicBool, AtomicU64};
+    use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize};
     use std::sync::{Arc, Mutex};
 
     use tracing::dispatcher::Dispatch;
@@ -668,7 +589,7 @@ mod tests {
             connection_info: Arc::new(ConnectionInfo::with_addr("tcp://127.0.0.1:53").unwrap()),
             transport: ConnectionType::TCP,
             connections: ArrayQueue::new(max_size.max(1)),
-            active_count: AtomicUsize::new(0),
+            capacity: PoolCapacity::new(max_size.max(1)),
             max_size,
             min_size,
             max_idle: Duration::from_secs(idle_secs),
@@ -676,7 +597,6 @@ mod tests {
             timeout_policy: QueryTimeoutPolicy::Close,
             connect_timeout: Duration::from_secs(5),
             next_id: AtomicU16::new(1),
-            release_notified: Notify::new(),
             maintenance_task_handle: Mutex::new(None),
         }
     }
@@ -712,7 +632,6 @@ mod tests {
 
         let mut pool = make_pool(0, 1, 10, MockBuilder::new(vec![]));
         pool.connection_info = Arc::new(info);
-        pool.active_count.store(1, Ordering::Relaxed);
         let logs = CapturedLogs::default();
         let subscriber = tracing_subscriber::fmt()
             .with_ansi(false)
@@ -722,9 +641,14 @@ mod tests {
             .finish();
 
         tracing::dispatcher::with_default(&Dispatch::new(subscriber), || {
+            let permit = pool
+                .capacity
+                .try_acquire_owned()
+                .expect("capacity should be free for the borrow");
             drop(BorrowedConnection::new(
                 &pool,
                 Arc::new(MockConnection::new(true, 0, 0)),
+                permit,
             ));
         });
 
@@ -760,7 +684,6 @@ mod tests {
         pool.connections
             .push(conn.clone())
             .expect("queue should accept connection");
-        pool.active_count.store(1, Ordering::Relaxed);
 
         let selected = pool
             .get(QueryDeadline::new(Duration::from_secs(1)))
@@ -774,7 +697,7 @@ mod tests {
                 .expect("borrowed connection should exist"),
             &conn
         ));
-        assert_eq!(pool.active_count.load(Ordering::Relaxed), 1);
+        assert_eq!(pool.capacity.held(), 1);
     }
 
     #[tokio::test]
@@ -785,7 +708,6 @@ mod tests {
         pool.connections
             .push(stale.clone())
             .expect("queue should accept stale connection");
-        pool.active_count.store(1, Ordering::Relaxed);
 
         let selected = pool
             .get(QueryDeadline::new(Duration::from_secs(1)))
@@ -800,20 +722,23 @@ mod tests {
             &replacement
         ));
         assert_eq!(stale.close_calls(), 1);
-        assert_eq!(pool.active_count.load(Ordering::Relaxed), 1);
+        assert_eq!(pool.capacity.held(), 1);
     }
 
     #[test]
     fn test_release_closes_unavailable_connection_instead_of_requeueing() {
         let pool = make_pool(0, 2, 10, MockBuilder::new(vec![]));
         let conn = Arc::new(MockConnection::new(false, 0, 0));
-        pool.active_count.store(1, Ordering::Relaxed);
+        let permit = pool
+            .capacity
+            .try_acquire_owned()
+            .expect("capacity should be free for the borrow");
 
-        pool.release(conn.clone());
+        BorrowedConnection::new(&pool, conn.clone(), permit).release();
 
         assert_eq!(conn.close_calls(), 1);
         assert_eq!(pool.connections.len(), 0);
-        assert_eq!(pool.active_count.load(Ordering::Relaxed), 0);
+        assert_eq!(pool.capacity.held(), 0);
     }
 
     #[tokio::test]
@@ -828,14 +753,13 @@ mod tests {
         pool.connections
             .push(invalid.clone())
             .expect("queue should accept invalid connection");
-        pool.active_count.store(2, Ordering::Relaxed);
 
         pool.maintain().await;
 
         assert_eq!(idle.close_calls(), 1);
         assert_eq!(invalid.close_calls(), 1);
         assert_eq!(pool.connections.len(), 0);
-        assert_eq!(pool.active_count.load(Ordering::Relaxed), 0);
+        assert_eq!(pool.capacity.held(), 0);
     }
 
     #[tokio::test]
@@ -846,13 +770,12 @@ mod tests {
         pool.connections
             .push(conn.clone())
             .expect("queue should accept connection");
-        pool.active_count.store(1, Ordering::Relaxed);
 
         pool.maintain().await;
 
         assert_eq!(conn.close_calls(), 0);
         assert_eq!(pool.connections.len(), 1);
-        assert_eq!(pool.active_count.load(Ordering::Relaxed), 1);
+        assert_eq!(pool.capacity.held(), 0);
     }
 
     #[tokio::test]
@@ -864,7 +787,7 @@ mod tests {
         pool.maintain().await;
 
         assert_eq!(pool.connections.len(), 1);
-        assert_eq!(pool.active_count.load(Ordering::Relaxed), 1);
+        assert_eq!(pool.total_connections(), 1);
         let pooled = pool
             .connections
             .pop()
@@ -880,13 +803,12 @@ mod tests {
         pool.connections
             .push(conn.clone())
             .expect("queue should accept connection");
-        pool.active_count.store(1, Ordering::Relaxed);
 
         pool.maintain().await;
 
         assert_eq!(conn.close_calls(), 0);
         assert_eq!(pool.connections.len(), 1);
-        assert_eq!(pool.active_count.load(Ordering::Relaxed), 1);
+        assert_eq!(pool.capacity.held(), 0);
     }
 
     #[tokio::test]
@@ -896,7 +818,6 @@ mod tests {
         pool.connections
             .push(conn.clone())
             .expect("queue should accept connection");
-        pool.active_count.store(1, Ordering::Relaxed);
         let mut request = Message::new();
         request.set_id(21);
 
@@ -917,7 +838,6 @@ mod tests {
         let conn =
             Arc::new(MockConnection::new(true, 0, 0).with_query_delay(Duration::from_secs(60)));
         pool.connections.push(conn.clone()).unwrap();
-        pool.active_count.store(1, Ordering::Relaxed);
 
         let mut query =
             Box::pin(pool.query(Message::new(), QueryDeadline::new(Duration::from_secs(30))));
@@ -928,7 +848,7 @@ mod tests {
         assert_eq!(conn.close_calls(), 1);
         assert!(!conn.available());
         assert!(pool.connections.is_empty());
-        assert_eq!(pool.active_count.load(Ordering::Relaxed), 0);
+        assert_eq!(pool.capacity.held(), 0);
 
         let borrowed = pool
             .get(QueryDeadline::new(Duration::from_secs(1)))
@@ -936,7 +856,7 @@ mod tests {
             .expect("cancelled query must free capacity for a replacement");
         assert!(std::ptr::eq(borrowed.connection(), replacement.as_ref()));
         borrowed.release();
-        assert_eq!(pool.active_count.load(Ordering::Relaxed), 1);
+        assert_eq!(pool.capacity.held(), 0);
     }
 
     #[tokio::test]
@@ -947,7 +867,6 @@ mod tests {
         pool.connections
             .push(conn.clone())
             .expect("queue should accept connection");
-        pool.active_count.store(1, Ordering::Relaxed);
         let mut request = Message::new();
         request.set_id(22);
 
@@ -959,7 +878,7 @@ mod tests {
         assert_eq!(conn.query_calls(), 1);
         assert_eq!(conn.close_calls(), 1);
         assert_eq!(pool.connections.len(), 0);
-        assert_eq!(pool.active_count.load(Ordering::Relaxed), 0);
+        assert_eq!(pool.capacity.held(), 0);
     }
 
     #[tokio::test]
@@ -971,7 +890,12 @@ mod tests {
             10,
             MockBuilder::new(vec![Ok(replacement.clone())]),
         ));
-        pool.active_count.store(1, Ordering::Relaxed);
+        // Simulate one in-use connection: its permit blocks the pool (max 1)
+        // until the connection closes and frees capacity.
+        let in_use_permit = pool
+            .capacity
+            .try_acquire_owned()
+            .expect("capacity should be free initially");
 
         let waiting_pool = pool.clone();
         let expected_replacement = replacement.clone();
@@ -991,7 +915,7 @@ mod tests {
         });
         tokio::time::sleep(Duration::from_millis(10)).await;
 
-        pool.close_active_connection(Arc::new(MockConnection::new(true, 0, 0)));
+        drop(in_use_permit);
 
         let matched = tokio::time::timeout(Duration::from_secs(1), waiter)
             .await
@@ -1000,6 +924,7 @@ mod tests {
             .expect("get should create a replacement connection");
 
         assert!(matched);
-        assert_eq!(pool.active_count.load(Ordering::Relaxed), 1);
+        assert_eq!(pool.connections.len(), 1);
+        assert_eq!(pool.capacity.held(), 0);
     }
 }
