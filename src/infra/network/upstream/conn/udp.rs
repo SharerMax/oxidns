@@ -320,7 +320,8 @@ impl ConnectionBuilder<UdpConnection> for UdpConnectionBuilder {
         let socket = connect_udp(UdpDialOptions::new(
             self.target.clone(),
             self.socket_options.clone(),
-        ))?;
+        ))
+        .await?;
 
         debug!(
             conn_id,

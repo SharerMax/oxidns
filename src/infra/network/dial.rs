@@ -93,6 +93,28 @@ impl DialTarget {
         Ok(SocketAddr::new(ip, self.port))
     }
 
+    /// Resolve the endpoint address without blocking an async worker.
+    ///
+    /// When only a hostname is available (no literal IP, `dial_addr`, or
+    /// bootstrap-resolved address), the system resolver (getaddrinfo) can
+    /// block for seconds; run it on the blocking pool so callers' deadlines
+    /// and the rest of the runtime keep making progress.
+    async fn socket_addr_async(&self) -> Result<SocketAddr> {
+        let ip = match self.remote_ip {
+            Some(ip) => ip,
+            None => {
+                let host = self.host.clone();
+                let resolved = tokio::task::spawn_blocking(move || try_lookup_server_name(&host))
+                    .await
+                    .map_err(|err| {
+                        DnsError::runtime(format!("System DNS resolution task failed: {err}"))
+                    })?;
+                resolved?
+            }
+        };
+        Ok(SocketAddr::new(ip, self.port))
+    }
+
     #[cfg(any(
         feature = "_tls-client",
         feature = "_dns-client-doq",
@@ -398,15 +420,20 @@ pub fn try_lookup_server_name(server_name: &str) -> Result<IpAddr> {
 /// - SO_REUSEADDR is enabled to allow rapid reconnection
 /// - connect() is called to set the default destination (allows using send vs
 ///   send_to)
-pub(crate) fn connect_udp(options: UdpDialOptions) -> Result<UdpSocket> {
-    let socket_addr = options.target.socket_addr()?;
+/// - Hostname resolution runs on the blocking pool
+pub(crate) async fn connect_udp(options: UdpDialOptions) -> Result<UdpSocket> {
+    let socket_addr = options.target.socket_addr_async().await?;
+    create_connected_udp_socket(socket_addr, &options.socket)
+}
+
+fn create_connected_udp_socket(socket_addr: SocketAddr, options: &SocketOptions) -> Result<UdpSocket> {
     let socket = Socket::new(
         Domain::for_address(socket_addr),
         Type::DGRAM,
         Some(Protocol::UDP),
     )?;
 
-    configure_common_socket(&socket, &options.socket)?;
+    configure_common_socket(&socket, options)?;
     #[cfg(all(
         unix,
         not(any(
@@ -521,7 +548,7 @@ fn is_connect_in_progress(err: &std::io::Error) -> bool {
 /// TCP_NODELAY keeps small request frames from waiting for more data before
 /// being sent.
 pub(crate) async fn connect_tcp(options: TcpDialOptions) -> Result<TcpStream> {
-    let socket_addr = options.target.socket_addr()?;
+    let socket_addr = options.target.socket_addr_async().await?;
     let socket = create_tcp_socket(socket_addr, &options.socket)?;
     connect_tcp_socket(socket, socket_addr).await
 }

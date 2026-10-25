@@ -182,7 +182,8 @@ impl ConnectionBuilder<H3Connection> for H3ConnectionBuilder {
         let socket = connect_udp(UdpDialOptions::new(
             self.target.clone(),
             self.socket_options.clone(),
-        ))?;
+        ))
+        .await?;
 
         let quic_conn = connect_quic(
             socket,
