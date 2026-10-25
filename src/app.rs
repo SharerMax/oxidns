@@ -50,18 +50,26 @@ pub struct StartConfig {
 
 /// Start OxiDNS in the foreground using the provided CLI options.
 pub fn run(start: StartConfig) -> Result<()> {
-    match run_until_shutdown(start)? {
+    match run_until_shutdown(start, None)? {
         ShutdownSignal::Restart => exec_restart(),
         _ => Ok(()),
     }
 }
 
+/// Start OxiDNS as a Windows service, stopping gracefully when
+/// `service_stop_rx` resolves (fired by the SCM control handler).
 #[cfg(windows)]
-pub(crate) fn run_windows_service(start: StartConfig) -> Result<ShutdownSignal> {
-    run_until_shutdown(start)
+pub(crate) fn run_windows_service(
+    start: StartConfig,
+    service_stop_rx: Option<oneshot::Receiver<()>>,
+) -> Result<ShutdownSignal> {
+    run_until_shutdown(start, service_stop_rx)
 }
 
-fn run_until_shutdown(start: StartConfig) -> Result<ShutdownSignal> {
+fn run_until_shutdown(
+    start: StartConfig,
+    service_stop_rx: Option<oneshot::Receiver<()>>,
+) -> Result<ShutdownSignal> {
     // Capture the exe path before any binary replacement can invalidate it.
     ORIGINAL_EXE.get_or_init(|| std::env::current_exe().unwrap_or_default());
     AppClock::start();
@@ -73,7 +81,7 @@ fn run_until_shutdown(start: StartConfig) -> Result<ShutdownSignal> {
     }
     banner::print_startup_banner()?;
     let config = load_config(&start)?;
-    init_runtime(start, config)
+    init_runtime(start, config, service_stop_rx)
 }
 
 fn prepare_working_dir(working_dir: Option<&std::path::PathBuf>) -> Result<()> {
@@ -89,7 +97,11 @@ fn prepare_working_dir(working_dir: Option<&std::path::PathBuf>) -> Result<()> {
     Ok(())
 }
 
-fn init_runtime(options: StartConfig, config: Config) -> Result<ShutdownSignal> {
+fn init_runtime(
+    options: StartConfig,
+    config: Config,
+    service_stop_rx: Option<oneshot::Receiver<()>>,
+) -> Result<ShutdownSignal> {
     let worker_threads = config.runtime.effective_worker_threads();
     let mut tokio_runtime = runtime::Builder::new_multi_thread();
     tokio_runtime
@@ -99,7 +111,7 @@ fn init_runtime(options: StartConfig, config: Config) -> Result<ShutdownSignal> 
     let tokio_runtime = tokio_runtime
         .build()
         .map_err(|err| DnsError::runtime(format!("Failed to initialize Tokio runtime: {err}")))?;
-    tokio_runtime.block_on(run_async_main(options, config))
+    tokio_runtime.block_on(run_async_main(options, config, service_stop_rx))
 }
 
 /// Replace the current process image with a fresh copy of OxiDNS using the
@@ -256,7 +268,11 @@ async fn wait_for_shutdown_signal() -> Result<ShutdownSignal> {
 }
 
 #[hotpath::main]
-async fn run_async_main(options: StartConfig, config: Config) -> Result<ShutdownSignal> {
+async fn run_async_main(
+    options: StartConfig,
+    config: Config,
+    mut service_stop_rx: Option<oneshot::Receiver<()>>,
+) -> Result<ShutdownSignal> {
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<Result<ShutdownSignal>>();
     tokio::spawn(async move {
         let _ = shutdown_tx.send(wait_for_shutdown_signal().await);
@@ -312,6 +328,7 @@ async fn run_async_main(options: StartConfig, config: Config) -> Result<Shutdown
     let shutdown_signal = wait_for_termination(
         &mut control_rx,
         shutdown_rx,
+        &mut service_stop_rx,
         &mut assembly,
         &mut current_config,
         app_controller.clone(),
@@ -333,6 +350,7 @@ async fn run_async_main(options: StartConfig, config: Config) -> Result<Shutdown
 async fn wait_for_termination(
     control_rx: &mut mpsc::UnboundedReceiver<ControlCommand>,
     mut shutdown_rx: oneshot::Receiver<Result<ShutdownSignal>>,
+    service_stop_rx: &mut Option<oneshot::Receiver<()>>,
     assembly: &mut AppAssembly,
     current_config: &mut Config,
     controller: std::sync::Arc<AppController>,
@@ -347,6 +365,19 @@ async fn wait_for_termination(
                     "Received shutdown signal, initiating graceful shutdown"
                 );
                 return Ok(shutdown_signal);
+            }
+            service_stop = async {
+                match service_stop_rx.as_mut() {
+                    Some(rx) => rx.await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                if service_stop.is_ok() {
+                    info!(
+                        "Received service stop request from SCM, initiating graceful shutdown"
+                    );
+                    return Ok(ShutdownSignal::ApiRequest);
+                }
             }
             command = control_rx.recv() => {
                 match command {

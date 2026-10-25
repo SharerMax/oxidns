@@ -5,6 +5,7 @@
 
 use std::ffi::OsString;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use windows_service::service::{
     ServiceAccess, ServiceAction, ServiceActionType, ServiceControl, ServiceControlAccept,
@@ -27,6 +28,10 @@ enum WindowsServiceEvent {
     StopRequested,
     AppExited,
 }
+
+/// How long an SCM Stop waits for the app to drain gracefully before the
+/// wrapper falls back to an immediate exit.
+const GRACEFUL_STOP_WAIT: Duration = Duration::from_secs(20);
 
 /// Try to hand control to the Windows SCM dispatcher.
 ///
@@ -52,7 +57,6 @@ fn windows_service_entry(_args: Vec<OsString>) {
 
 fn run_windows_service() -> Result<()> {
     use std::sync::mpsc;
-    use std::time::Duration;
 
     let (shutdown_tx, shutdown_rx) = mpsc::channel::<WindowsServiceEvent>();
     let ctrl_tx = shutdown_tx.clone();
@@ -89,9 +93,13 @@ fn run_windows_service() -> Result<()> {
 
     let start_opts = parse_windows_service_start_config()?;
 
+    // Fired into the app runtime when SCM requests a stop so the app can run
+    // its full graceful shutdown instead of being cut off by process exit.
+    let (graceful_stop_tx, graceful_stop_rx) = tokio::sync::oneshot::channel::<()>();
+
     let app_tx = shutdown_tx;
     let app_thread = std::thread::spawn(move || {
-        let result = crate::app::run_windows_service(start_opts);
+        let result = crate::app::run_windows_service(start_opts, Some(graceful_stop_rx));
         let _ = app_tx.send(WindowsServiceEvent::AppExited);
         result
     });
@@ -107,16 +115,35 @@ fn run_windows_service() -> Result<()> {
         .recv()
         .map_err(|err| DnsError::runtime(format!("Windows service event channel closed: {err}")))?;
 
-    let _ = report(ServiceState::StopPending, ServiceControlAccept::empty(), 5);
+    let _ = report(
+        ServiceState::StopPending,
+        ServiceControlAccept::empty(),
+        GRACEFUL_STOP_WAIT.as_secs(),
+    );
 
     let shutdown_signal = match event {
         WindowsServiceEvent::AppExited => app_thread
             .join()
             .unwrap_or_else(|_| Err(DnsError::runtime("app thread panicked")))?,
         WindowsServiceEvent::StopRequested => {
-            // An explicit SCM stop is a clean shutdown.
-            let _ = report(ServiceState::Stopped, ServiceControlAccept::empty(), 0);
-            std::process::exit(0);
+            // Ask the app to drain gracefully and wait for it to finish.
+            let _ = graceful_stop_tx.send(());
+            let joined = loop {
+                match shutdown_rx.recv_timeout(GRACEFUL_STOP_WAIT) {
+                    Ok(WindowsServiceEvent::AppExited) => break app_thread.join(),
+                    // SCM may deliver duplicate Stop/Shutdown events; ignore.
+                    Ok(WindowsServiceEvent::StopRequested) => continue,
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                        eprintln!("OxiDNS service graceful stop timed out; exiting");
+                        let _ = report(ServiceState::Stopped, ServiceControlAccept::empty(), 0);
+                        std::process::exit(0);
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                        break app_thread.join()
+                    }
+                }
+            };
+            joined.unwrap_or_else(|_| Err(DnsError::runtime("app thread panicked")))?
         }
     };
 
