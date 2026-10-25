@@ -36,7 +36,7 @@ use crate::app::bootstrap::AppAssembly;
 use crate::config;
 use crate::config::types::Config;
 use crate::infra::clock::AppClock;
-use crate::infra::control::{AppController, ControlCommand};
+use crate::infra::control::{AppController, ControlCommand, ReloadPhase};
 use crate::infra::error::{DnsError, Result};
 use crate::infra::observability::logging;
 use crate::infra::task;
@@ -415,6 +415,7 @@ async fn handle_reload_command(
             return Ok(());
         }
     };
+    controller.mark_reload_phase(None, ReloadPhase::Building);
 
     let previous_config = current_config.clone();
     info!(
@@ -450,6 +451,7 @@ async fn handle_reload_command(
         }
     }
 
+    controller.mark_reload_phase(None, ReloadPhase::Swapping);
     bootstrap::stop(assembly).await;
     task::stop_all().await;
 
@@ -534,6 +536,7 @@ async fn reload_staged(
         .map_err(ReloadStagedError::Candidate)?;
 
     // Swap point: retire the old generation, then publish the candidate.
+    controller.mark_reload_phase(None, ReloadPhase::Swapping);
     bootstrap::stop(assembly).await;
     let new_assembly = bootstrap::activate_assembly(staged, Some(controller.clone()))
         .await
