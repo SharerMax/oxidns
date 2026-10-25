@@ -85,7 +85,9 @@ impl Default for UpgradeConfig {
             allow_prerelease: false,
             force: false,
             cleanup_after_apply: false,
-            timeout: Duration::from_secs(30),
+            // Bounds the whole archive download; tens-of-MB release assets on
+            // slow links need far more than a connect-scale budget.
+            timeout: Duration::from_secs(300),
             outbound: None,
             socks5: None,
             insecure_skip_verify: false,
