@@ -85,14 +85,6 @@ impl DialTarget {
         self.port
     }
 
-    fn socket_addr(&self) -> Result<SocketAddr> {
-        let ip = match self.remote_ip {
-            Some(ip) => ip,
-            None => try_lookup_server_name(&self.host)?,
-        };
-        Ok(SocketAddr::new(ip, self.port))
-    }
-
     /// Resolve the endpoint address without blocking an async worker.
     ///
     /// When only a hostname is available (no literal IP, `dial_addr`, or
@@ -426,7 +418,10 @@ pub(crate) async fn connect_udp(options: UdpDialOptions) -> Result<UdpSocket> {
     create_connected_udp_socket(socket_addr, &options.socket)
 }
 
-fn create_connected_udp_socket(socket_addr: SocketAddr, options: &SocketOptions) -> Result<UdpSocket> {
+fn create_connected_udp_socket(
+    socket_addr: SocketAddr,
+    options: &SocketOptions,
+) -> Result<UdpSocket> {
     let socket = Socket::new(
         Domain::for_address(socket_addr),
         Type::DGRAM,
@@ -507,18 +502,13 @@ async fn connect_tcp_socket(socket: Socket, socket_addr: SocketAddr) -> Result<T
 }
 
 fn is_connect_in_progress(err: &std::io::Error) -> bool {
-    if err.kind() == ErrorKind::WouldBlock {
-        return true;
-    }
-
     #[cfg(unix)]
     {
-        err.raw_os_error() == Some(libc::EINPROGRESS)
+        err.kind() == ErrorKind::WouldBlock || err.raw_os_error() == Some(libc::EINPROGRESS)
     }
-
     #[cfg(not(unix))]
     {
-        false
+        err.kind() == ErrorKind::WouldBlock
     }
 }
 

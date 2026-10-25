@@ -142,7 +142,7 @@ fn run_windows_service() -> Result<()> {
                         std::process::exit(0);
                     }
                     Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                        break app_thread.join()
+                        break app_thread.join();
                     }
                 }
             };
