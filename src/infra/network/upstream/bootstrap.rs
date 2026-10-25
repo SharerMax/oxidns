@@ -326,8 +326,11 @@ impl<C: Connection> Upstream for BootstrapUpstream<C> {
         // change)
         self.init_pool_if_needed(deadline).await?;
 
-        // Get current connection pool (lock-free atomic load)
-        let pool = self.pool.load();
+        // Get current connection pool (lock-free atomic load). `load_full`
+        // clones the Arc instead of pinning a Guard across the whole query
+        // await, so concurrent queries do not accumulate arc-swap guard debt
+        // and delay reclamation of replaced pools.
+        let pool = self.pool.load_full();
 
         // Forward query through the pool
         pool.pool.query(request, deadline).await
