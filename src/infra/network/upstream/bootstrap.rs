@@ -326,8 +326,16 @@ impl<C: Connection> Upstream for BootstrapUpstream<C> {
         // change)
         self.init_pool_if_needed(deadline).await?;
 
-        // Get current connection pool (lock-free atomic load)
-        let pool = self.pool.load();
+        // Get current connection pool (lock-free atomic load). Clone the `Arc`
+        // out of the borrow and release the `Guard` right away: a `Guard` kept
+        // across the whole query await would occupy one of the limited
+        // per-thread borrow slots for the duration of the query, and a pool
+        // swap would have to promote every pinned guard to an owned instance,
+        // making the readers contend on the old instance's reference count.
+        // `load_full()` avoids the slot as well, but it pays every outstanding
+        // debt on the current value, which walks every thread that uses
+        // `ArcSwap` - too much work for a per-query path.
+        let pool = (*self.pool.load()).clone();
 
         // Forward query through the pool
         pool.pool.query(request, deadline).await
