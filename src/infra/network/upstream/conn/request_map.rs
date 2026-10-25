@@ -154,7 +154,24 @@ pub struct RequestMap {
     slots: Box<[Slot]>,
     mask: usize,
     next_id: AtomicU16,
+    /// Odd increment between issued IDs: coprime with the 2^16 ID space, so
+    /// the full range is still covered while consecutive IDs are not
+    /// guessable from one observation.
+    id_stride: u16,
     size: AtomicU16,
+}
+
+/// Random (start, stride) pair for ID issuance.
+///
+/// A per-process random hash seed keeps the values unpredictable without
+/// adding a dependency; the stride is forced odd so it stays coprime with
+/// 2^16.
+fn random_id_seed() -> (u16, u16) {
+    use std::hash::{BuildHasher, Hasher};
+    let mut hasher = ahash::RandomState::new().build_hasher();
+    hasher.write_u64(0x004f_5849_2152_4944);
+    let bits = hasher.finish();
+    ((bits >> 32) as u16, (bits as u16) | 1)
 }
 
 impl RequestMap {
@@ -170,17 +187,23 @@ impl RequestMap {
         for _ in 0..slot_count {
             slots.push(Slot::empty());
         }
+        // Predictable sequential IDs (0, 1, 2, ...) let an off-path
+        // spoofer that observes one transaction ID derive the rest
+        // (Kaminsky-style). Issue IDs from a random start with a random
+        // odd stride instead.
+        let (id_start, id_stride) = random_id_seed();
         Self {
             slots: slots.into_boxed_slice(),
             mask: slot_count - 1,
-            next_id: AtomicU16::new(0),
+            next_id: AtomicU16::new(id_start),
+            id_stride,
             size: AtomicU16::new(0),
         }
     }
 
     #[inline(always)]
     pub fn store(&self, tx: Sender<Message>) -> Result<RequestGuard<'_>> {
-        let start = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let start = self.next_id.fetch_add(self.id_stride, Ordering::Relaxed);
         let mut tx = Some(tx);
 
         for offset in 0..ID_SPACE_SIZE {
@@ -587,9 +610,18 @@ mod tests {
         let (tx3, _rx3) = oneshot::channel();
         let mut third = map.store(tx3).expect("store should succeed");
 
+        // IDs advance by the per-map odd stride and must wrap modulo 2^16
+        // while staying distinct and retrievable.
+        let stride = map.id_stride;
+        assert!(stride % 2 == 1, "stride must stay odd");
         assert_eq!(first.query_id(), u16::MAX - 1);
-        assert_eq!(second.query_id(), u16::MAX);
-        assert_eq!(third.query_id(), 0);
+        assert_eq!(second.query_id(), (u16::MAX - 1).wrapping_add(stride));
+        assert_eq!(
+            third.query_id(),
+            (u16::MAX - 1).wrapping_add(stride).wrapping_add(stride)
+        );
+        assert_ne!(first.query_id(), second.query_id());
+        assert_ne!(second.query_id(), third.query_id());
         assert!(first.remove());
         assert!(second.remove());
         assert!(third.remove());
