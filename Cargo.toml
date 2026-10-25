@@ -375,7 +375,7 @@ hotpath = ["hotpath/hotpath"]
 hotpath-alloc = ["hotpath/hotpath-alloc"]
 
 [dev-dependencies]
-criterion = "0.8.2"
+criterion = { version = "0.8.2", features = ["async", "async_tokio"] }
 tempfile = "3.23.0"
 tokio = { version = "1", features = ["test-util"] }
 # Integration tests use hyper to spin up mock HTTP servers regardless of
@@ -398,6 +398,9 @@ harness = false
 
 [[bench]]
 name = "ip_rule_matcher"
+
+[[bench]]
+name = "pool_capacity_churn"
 harness = false
 
 [[bench]]

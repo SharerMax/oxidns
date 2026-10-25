@@ -13,6 +13,7 @@ mod builder;
 mod config;
 mod conn;
 mod pool;
+pub use pool::PoolCapacity;
 mod pooled;
 pub mod probe;
 mod traits;

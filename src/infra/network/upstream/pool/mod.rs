@@ -178,7 +178,7 @@ const MAINTENANCE_DURATION: Duration = Duration::from_secs(10);
 /// migration; ReusePool pools live until dropped and never close capacity
 /// early.
 #[derive(Debug)]
-pub(crate) struct PoolCapacity {
+pub struct PoolCapacity {
     semaphore: Arc<Semaphore>,
     /// Total permits ever issued (initial + `add_permits`); grows with the
     /// resource the gate models (e.g. pool slots), so `held` stays exact.
@@ -186,7 +186,7 @@ pub(crate) struct PoolCapacity {
 }
 
 impl PoolCapacity {
-    pub(crate) fn new(total_permits: usize) -> Self {
+    pub fn new(total_permits: usize) -> Self {
         Self {
             semaphore: Arc::new(Semaphore::new(total_permits)),
             total: AtomicUsize::new(total_permits),
@@ -197,7 +197,7 @@ impl PoolCapacity {
     ///
     /// Cancellation-safe: dropping the future loses no permit; dropping the
     /// returned permit returns the capacity.
-    pub(crate) async fn acquire_owned(&self) -> OwnedSemaphorePermit {
+    pub async fn acquire_owned(&self) -> OwnedSemaphorePermit {
         self.semaphore
             .clone()
             .acquire_owned()
@@ -206,18 +206,18 @@ impl PoolCapacity {
     }
 
     /// Non-blocking acquire for background expansion and prefill.
-    pub(crate) fn try_acquire_owned(&self) -> Option<OwnedSemaphorePermit> {
+    pub fn try_acquire_owned(&self) -> Option<OwnedSemaphorePermit> {
         self.semaphore.clone().try_acquire_owned().ok()
     }
 
     /// Grow the capacity by `n` permits (new slots joining the pool).
-    pub(crate) fn add_permits(&self, n: usize) {
+    pub fn add_permits(&self, n: usize) {
         self.total.fetch_add(n, Ordering::Relaxed);
         self.semaphore.add_permits(n);
     }
 
     /// Permits currently held (capacity in use or being created).
-    pub(crate) fn held(&self) -> usize {
+    pub fn held(&self) -> usize {
         self.total.load(Ordering::Relaxed) - self.semaphore.available_permits()
     }
 }
