@@ -1,6 +1,6 @@
 # 设计:连接池容量管理 Semaphore 化改造
 
-状态:进行中——S1+S2+S3 已实现(PoolCapacity 公共层、ReusePool 与 PipelinePool 迁移);S4(清理+基准)待实施
+状态:已实现——S1–S3(PoolCapacity、ReusePool、PipelinePool 迁移)与 S4(churn 基准回归护栏,~40-90M 容量事务/s)全部落地;两池零手写 notify
 基线:v1.6.1 + 分支 `fix/code-review-priorities`
 范围:`src/infra/network/upstream/pool/{mod,pipeline,reuse}.rs`
 

@@ -1,6 +1,6 @@
 # 设计:零停机配置热重载(Zero-Downtime Reload)
 
-状态:进行中——PR-A(72637c47)与 PR-B(cd9f5cbc 后续提交:staged reload 主链 + 指标分代 + Unix 双绑)已实现;PR-C 中 pending 注册的指标部分已随 PR-B 落地,任务/API 路由延迟注册确认无需(任务由插件自管,API 路由在 activate 阶段注册);PR-D(状态机 phase)待实施
+状态:已实现——PR-A(build/install 拆分,72637c47)、PR-B(staged 主链 + 指标分代 + Unix 双绑,36b27388)、PR-D(状态机 phase,b7c93320)全部落地;PR-C 经核实无需独立实现(指标 pending 随 PR-B,任务自管,API 路由在 activate 注册)
 基线:v1.6.1 + 分支 `fix/code-review-priorities`
 范围:`src/app.rs`、`src/app/bootstrap.rs`、`src/plugin/registry/runtime.rs`、`src/api/`、各 server 插件
 
