@@ -47,4 +47,8 @@ git cherry-pick b7c93320
 git push upstream-or-fork feat/staged-reload
 ```
 
-注意:36b27388 的 diff 含 metrics.rs 与 listen.rs 的变更,与本系列自洽;若与 semaphore 系列冲突(两边都动了 `pool/mod.rs`?否——本系列不动 pool),冲突面预计为空;72637c47 同时被两个系列需要,先合入本系列,semaphore 系列基于其后再 cherry-pick 即可。
+注意:
+
+- `36b27388` 的 diff 含 `metrics.rs`(分代注册)与 `listen.rs`(UDP reuseport)的变更,与本系列自洽;文件面为 `app.rs`(+130,重载分派)、`app/bootstrap.rs`(prepare/activate 两相)、`listen.rs`、`observability/metrics.rs`、`plugin/{mod.rs,registry/{mod.rs,runtime.rs}}`——与 semaphore 系列(只动 `infra/network/upstream/pool/*`)**冲突面为空**。
+- `72637c47` 同时被 semaphore 系列需要(其 S4 的 cfg 统一针对本提交引入的 `build_registry`),先合入本系列,semaphore 系列基于其后再 cherry-pick 即可。
+- phase 可观测完整落在本系列的 `b7c93320`(`control.rs` + `app.rs`),不需要从 `3e3db421` 携带任何东西。

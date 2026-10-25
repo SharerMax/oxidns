@@ -6,7 +6,7 @@
 
 - `87cad1b2`(chore: satisfy rustfmt and clippy on windows nightly)横跨 api / upstream / upgrade 三个系列的文件(auth.rs 导入重排、dial.rs 死代码清理、h2/h3 BufMut、upgrade cfg 门控),**必须**在它依赖的提交之后 cherry-pick:api 系列的 `06b42ea1`、upstream 系列的 `4db4f6a0` 与 `d08d26e7`。建议放在这些系列中**最后合并的一个**里,或手工拆分。不携带它不影响 Linux CI(这些是 Windows nightly clippy 的 lint)。
 - 推荐合并顺序:五个评审系列(互相独立)→ semaphore-pools(需 `3f14471d` 上下文)→ staged-reload(体量最大,评审周期最长)。
-- `150e615e` / `47d55ae6`(设计文档状态)与 `06f0e734`(本文)是工作分支元数据,不进入上游 PR;设计文档本身(`design-*.md`)可随对应系列携带,也可不带。
+- 分支元数据提交共 4 个,不进入上游 PR:`150e615e`/`47d55ae6`(设计文档状态)与 `06f0e734`/`b6e7791e`(PR 系列拆分文档);设计文档本身(`design-*.md`)可随对应系列携带,也可不带。
 
 ---
 
@@ -96,4 +96,4 @@ PR 标题建议:`fix(service,upgrade): graceful SCM stop and upgrade hardening`
 | semaphore-pools | 5 | 中 | 见 `pr-series-semaphore-pools.md` |
 | staged-reload | 3 | 中 | 见 `pr-series-staged-reload.md`,建议最后合并 |
 
-分支总提交 38 = 上表 3+8+5+7+3+1+5+3(系列) + 2(设计文档状态)+ 1(本文)。
+分支总提交 39 = 五个修复系列 26 + 共享 lint 1 + semaphore 5 + staged-reload 3 + 分支元数据 4。

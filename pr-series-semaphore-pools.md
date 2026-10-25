@@ -9,8 +9,8 @@
 | # | 提交 | 标题 | 性质 | 依赖 |
 |---|---|---|---|---|
 | 0 | `3f14471d` | fix(upstream): wake parked pool waiters on release and requeue | 应急正确性修复(可独立合入,被后续重构整体取代) | 无 |
-| 1 | `72637c47` | refactor(plugin): split runtime build from install | 与本系列无直接关系,**不需要**;仅当与 staged-reload 系列同分支时保留 | — |
-| 2 | `ac055074` | refactor(upstream): semaphore capacity for ReusePool (design S1+S2) | 结构替换:ReusePool → PoolCapacity(Semaphore) | 建议先合 0(上下文) |
+| 1 | `72637c47` | refactor(plugin): split runtime build from install | **被本系列需要**:S4 的 `3e3db421` 对其引入的 `build_registry` 做 cfg 统一 | 无 |
+| 2 | `ac055074` | refactor(upstream): semaphore capacity for ReusePool (design S1+S2) | 结构替换:ReusePool → PoolCapacity(Semaphore) | 建议先合 0(上下文);#1 已在 |
 | 3 | `cd9f5cbc` | refactor(upstream): semaphore load capacity for PipelinePool (design S3) | 结构替换:PipelinePool → 池级许可 + per-slot CAS | 2(PoolCapacity.add_permits) |
 | 4 | `3e3db421` | feat(control,bench): … capacity churn bench (design PR-D + S4) — **仅 bench 部分** | 基准护栏 + PoolCapacity 公开 + cfg 统一 | 3 |
 | 5 | `a39dcef5` | fix(bench): pass criterion an owned task Handle per invocation | bench 修正 | 4 |
@@ -22,18 +22,21 @@ git checkout -b feat/semaphore-pools feat/staged-reload   # 或 main + cherry-pi
 git cherry-pick 3f14471d   # 可选:先出应急修复 PR
 git cherry-pick ac055074
 git cherry-pick cd9f5cbc
-# 手工带入 S4 的 bench 子集(见下),或直接 cherry-pick 3e3db421 后
-# git checkout feat/staged-reload -- src/infra/control.rs src/app.rs 撤销 phase 部分
+# 3e3db421 混含 bench(本系列)与文档创建(元数据),且 phase 并不在其中
+# (phase 全在 b7c93320,属 staged-reload 系列)。cherry-pick 后剔除
+# design-semaphore-pool-refactor.md 即可:
+git cherry-pick 3e3db421 && git rm design-semaphore-pool-refactor.md
 git cherry-pick a39dcef5
 ```
 
 S4 bench 子集的文件面:
 
 - 新增 `benches/pool_capacity_churn.rs`(含 a39dcef5 修正);
-- `Cargo.toml`:criterion 加 `features = ["async", "async_tokio"]`,新增 `[[bench]] pool_capacity_churn`;
+- `Cargo.toml` + `Cargo.lock`:criterion 加 `features = ["async", "async_tokio"]`,新增 `[[bench]] pool_capacity_churn`;
 - `src/infra/network/upstream/mod.rs`:`pub use pool::PoolCapacity;`;
-- `src/infra/network/upstream/pool/mod.rs`:PoolCapacity 已在 ac055074 引入,无需额外;
-- `src/plugin/registry/runtime.rs` 的 `build_registry` cfg 统一(`drop(test_guard)` + 无条件参数)——该提交同时被 bench 编译需要,若 series 基于 main 需一并带入。
+- `src/infra/network/upstream/pool/mod.rs`:**PoolCapacity 由 pub(crate) 改 pub**(`total` 字段改 `AtomicUsize` 支持动态 `add_permits` 精确记账)——这一步在 `3e3db421`,不是 ac055074;
+- `src/plugin/registry/runtime.rs` 的 `build_registry` cfg 统一(`drop(test_guard)` + 无条件参数;依赖 `72637c47` 引入的方法);
+- **剔除**:`3e3db421` 同时创建了 `design-semaphore-pool-refactor.md`(分支元数据,不进上游)并对 `src/plugin/registry/init_plan.rs` 做纯 fmt 尾随(属 `72637c47`,cherry-pick 该提交时自然带上)。
 
 ## PR 描述要点
 
