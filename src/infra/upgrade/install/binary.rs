@@ -39,7 +39,14 @@ pub(crate) fn replace_binary_windows(
     }
     // Move staged binary to the original path.
     if let Err(e) = fs::rename(&staging, target) {
-        let _ = fs::rename(backup_path, target); // attempt rollback
+        if let Err(rollback_err) = fs::rename(backup_path, target) {
+            tracing::error!(
+                backup = %backup_path.display(),
+                target = %target.display(),
+                error = %rollback_err,
+                "binary rollback failed after failed placement; service binary may be missing"
+            );
+        }
         let _ = fs::remove_file(&staging);
         return Err(DnsError::runtime(format!(
             "failed to place new binary at '{}': {e}",

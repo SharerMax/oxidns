@@ -188,7 +188,14 @@ pub(crate) async fn apply_unchecked(
             ))
         })?;
         if let Err(err) = replace_binary(&extracted, &current_exe) {
-            let _ = fs::copy(&backup_path, &current_exe);
+            if let Err(rollback_err) = fs::copy(&backup_path, &current_exe) {
+                tracing::error!(
+                    backup = %backup_path.display(),
+                    target = %current_exe.display(),
+                    error = %rollback_err,
+                    "binary rollback failed after failed replacement; service binary may be missing"
+                );
+            }
             return Err(err);
         }
     }
