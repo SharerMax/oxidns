@@ -215,7 +215,8 @@ impl ConnectionBuilder<QuicConnection> for QuicConnectionBuilder {
         let socket = connect_udp(UdpDialOptions::new(
             self.target.clone(),
             self.socket_options.clone(),
-        ))?;
+        ))
+        .await?;
 
         // Establish QUIC connection (includes TLS 1.3 handshake)
         let quic_conn = connect_quic(
