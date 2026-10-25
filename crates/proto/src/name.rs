@@ -445,7 +445,6 @@ impl Name {
         let mut next_offset = None;
         let mut wire = WireBuf::new();
         let mut wire_label_offsets = WireLabelOffsets::new();
-        let mut visited = SmallVec::<[u16; 16]>::new();
         let mut pointer_count = 0usize;
         let mut wire_budget = MAX_NAME_WIRE_OCTETS;
 
@@ -514,9 +513,15 @@ impl Name {
                             "dns compression pointer exceeds packet length",
                         ));
                     }
-                    if visited.contains(&(ptr as u16)) {
+                    // RFC 1035 4.1.4: a pointer references a prior occurrence,
+                    // so every jump must land strictly before the current
+                    // position. Enforcing this makes each jump strictly
+                    // decrease the cursor, which rules out loops without the
+                    // previous O(n^2) visited-offset scan (a crafted packet
+                    // could burn ~1000x CPU on it).
+                    if ptr >= cursor {
                         return Err(DnsError::protocol(
-                            "dns name compression pointer loop detected",
+                            "dns compression pointer does not reference a prior occurrence",
                         ));
                     }
 
@@ -528,7 +533,6 @@ impl Name {
                     if next_offset.is_none() {
                         next_offset = Some(cursor + 2);
                     }
-                    visited.push(ptr as u16);
                     cursor = ptr;
                 }
                 _ => return Err(DnsError::protocol("invalid dns label type")),
