@@ -228,6 +228,12 @@ async fn run_server(
                     Err(e) if is_client_port_unreachable(&e) => {
                         debug!(listen = %addr, error = %e, "UDP reply destination is no longer listening");
                     }
+                    // A malformed datagram only affects the attacker's own
+                    // packet; keep decode failures at debug level so a
+                    // garbage flood cannot drown the log at line rate.
+                    Err(crate::infra::error::DnsError::Protocol(e)) => {
+                        debug!(listen = %addr, error = %e, "Dropping malformed UDP datagram");
+                    }
                     Err(e) => {
                         warn!("Error receiving message on UDP socket: {}", e);
                     }
