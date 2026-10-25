@@ -57,8 +57,9 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use http::HeaderValue;
+
+    use super::*;
 
     fn basic_config() -> ApiAuthConfig {
         ApiAuthConfig::Basic {
