@@ -35,6 +35,7 @@
 //! - Connection reuse to amortize handshake costs
 
 use std::fmt::Debug;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
@@ -179,14 +180,16 @@ const MAINTENANCE_DURATION: Duration = Duration::from_secs(10);
 #[derive(Debug)]
 pub(crate) struct PoolCapacity {
     semaphore: Arc<Semaphore>,
-    total: usize,
+    /// Total permits ever issued (initial + `add_permits`); grows with the
+    /// resource the gate models (e.g. pool slots), so `held` stays exact.
+    total: AtomicUsize,
 }
 
 impl PoolCapacity {
     pub(crate) fn new(total_permits: usize) -> Self {
         Self {
             semaphore: Arc::new(Semaphore::new(total_permits)),
-            total: total_permits,
+            total: AtomicUsize::new(total_permits),
         }
     }
 
@@ -207,9 +210,15 @@ impl PoolCapacity {
         self.semaphore.clone().try_acquire_owned().ok()
     }
 
-    /// Permits currently held (connections in use or being created).
+    /// Grow the capacity by `n` permits (new slots joining the pool).
+    pub(crate) fn add_permits(&self, n: usize) {
+        self.total.fetch_add(n, Ordering::Relaxed);
+        self.semaphore.add_permits(n);
+    }
+
+    /// Permits currently held (capacity in use or being created).
     pub(crate) fn held(&self) -> usize {
-        self.total - self.semaphore.available_permits()
+        self.total.load(Ordering::Relaxed) - self.semaphore.available_permits()
     }
 }
 
