@@ -22,6 +22,10 @@ fn churn(c: &mut Criterion) {
         .enable_all()
         .build()
         .expect("bench runtime should build");
+    // Cheap Arc-based handle: cloned per benchmark invocation so the FnMut
+    // closure never has to move or borrow the Runtime itself, and the
+    // `to_async` executor relies only on the owned-Handle impl.
+    let handle = runtime.handle().clone();
 
     let mut group = c.benchmark_group("pool_capacity_churn");
     group.throughput(criterion::Throughput::Elements(
@@ -33,7 +37,7 @@ fn churn(c: &mut Criterion) {
             criterion::BenchmarkId::from_parameter(permits),
             &permits,
             |b, &permits| {
-                b.to_async(&runtime).iter(|| async move {
+                b.to_async(handle.clone()).iter(|| async move {
                     let capacity = Arc::new(PoolCapacity::new(permits));
                     let done = Arc::new(AtomicU64::new(0));
                     const ITERATIONS: u64 = 512;
