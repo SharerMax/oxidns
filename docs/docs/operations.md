@@ -82,7 +82,7 @@ curl -fsS http://127.0.0.1:9199/api/build
 7. 等待 `/api/reload/status` 完成，再检查 readiness、DNS 查询和关键指标。
 8. 保留上一份配置直到观察窗口结束。
 
-只更新规则数据时，优先使用 provider 级 reload；插件拓扑、全局配置或 server 发生变化时再使用全量 reload。全量 reload 失败会尝试恢复旧 runtime，但重建窗口仍可能产生短暂中断。
+只更新规则数据时，优先使用 provider 级 reload；插件拓扑、全局配置或 server 发生变化时再使用全量 reload。Unix 上的全量 reload 为分阶段执行：候选运行时先在旧一代继续服务时完成构建与端口绑定，候选构建失败时运行中的服务完全不受影响；非 Unix 平台仍为停止后重建，失败会尝试恢复旧 runtime，期间可能产生短暂中断。
 
 ## 故障定位顺序
 

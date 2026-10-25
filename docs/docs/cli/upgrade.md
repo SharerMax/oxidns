@@ -65,7 +65,7 @@ sudo oxidns upgrade apply --no-restart
 - `--force`
   - `apply` 时即使目标 release 不比当前版本更新，也继续下载、校验并替换。
 - `--timeout <DURATION>`
-  - HTTP 请求超时，例如 `30s`、`2m`。
+  - 下载与解包的总超时，例如 `300s`、`2m`；默认 `300s`。
 - `--socks5 <ADDR>`
   - 可选 SOCKS5 代理。
 - `--insecure-skip-verify`

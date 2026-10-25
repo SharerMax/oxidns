@@ -29,7 +29,7 @@ import Admonition from "@theme/Admonition";
       no_restart: false
       force: false
       cleanup: true
-      timeout: 30s
+      timeout: 300s
       outbound: remote
       socks5: 127.0.0.1:1080
       insecure_skip_verify: false
@@ -72,7 +72,9 @@ import Admonition from "@theme/Admonition";
     - 默认值：`false`
     - 设为 `true` 时，升级成功后不触发自动重启。
     - 默认值 `false` 会在升级成功后自动重启：CLI `apply` 通过系统服务管理器重启已安装服务，插件内执行时通过应用控制通道触发优雅重启并加载新二进制。
-- `timeout`、`outbound`、`socks5`、`insecure_skip_verify`
+- `timeout`
+  - 下载与解包的总超时，默认 `300s`。
+- `outbound`、`socks5`、`insecure_skip_verify`
     - 与 CLI `upgrade` 参数含义一致。
     - `outbound` 引用 `network.outbound.profiles` 中的出站配置；旧 `socks5` 字段继续兼容，且会覆盖 profile 里的代理设置。
 

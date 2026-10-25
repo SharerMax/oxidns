@@ -199,6 +199,13 @@ title: 健康、控制、日志与升级
   * `failed`
 * `pending`
 * `in_progress`
+* `phase`
+  * 重载进行中的细粒度阶段:`validating`、`building`、`swapping`;失败时保留 `failed`;成功后清空。
+  * Unix 上的全量 reload 为分阶段执行:候选运行时在旧一代继续服务时构建并绑定端口(零中断),仅在切换阶段短暂重叠。
+* `running_version`
+  * 当前实际运行的配置版本(SHA256)。
+* `target_version`
+  * 最近一次重载试图应用的配置版本(SHA256)。
 * `last_started_ms`
 * `last_completed_ms`
 * `last_success_ms`
