@@ -5,7 +5,7 @@
 
 use std::panic::AssertUnwindSafe;
 #[cfg(debug_assertions)]
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use futures::FutureExt;
@@ -39,7 +39,7 @@ static SERIALIZE_RUNTIME_FOR_TESTS: AtomicBool = AtomicBool::new(false);
 
 #[cfg(debug_assertions)]
 pub fn enable_runtime_test_serialization() {
-    SERIALIZE_RUNTIME_FOR_TESTS.store(true, Ordering::Relaxed);
+    SERIALIZE_RUNTIME_FOR_TESTS.store(true, AtomicOrdering::Relaxed);
 }
 
 #[derive(Debug)]
@@ -140,11 +140,18 @@ impl PluginRuntimeManager {
         // current runtime may need lifecycle access to release that test
         // permit.
         #[cfg(debug_assertions)]
-        let test_guard = if SERIALIZE_RUNTIME_FOR_TESTS.load(Ordering::Relaxed) {
+        let test_guard = if SERIALIZE_RUNTIME_FOR_TESTS.load(AtomicOrdering::Relaxed) {
             Some(test_runtime_lock().lock_owned().await)
         } else {
+            #[cfg(not(debug_assertions))]
+            {
+                None
+            }
+            #[cfg(debug_assertions)]
             None
         };
+        #[cfg(not(debug_assertions))]
+        let test_guard: Option<tokio::sync::OwnedMutexGuard<()>> = None;
         let lifecycle_guard = self.lifecycle.clone().lock_owned().await;
         let manager = self.clone();
         tokio::spawn(async move {
@@ -202,11 +209,13 @@ impl PluginRuntimeManager {
     async fn build_registry(
         &self,
         config: Config,
-        #[cfg(debug_assertions)] test_guard: Option<tokio::sync::OwnedMutexGuard<()>>,
+        test_guard: Option<tokio::sync::OwnedMutexGuard<()>>,
     ) -> Result<Arc<PluginRegistry>> {
         let mut candidate = PluginRegistry::new();
         #[cfg(debug_assertions)]
         candidate.set_test_runtime_guard(test_guard);
+        #[cfg(not(debug_assertions))]
+        drop(test_guard);
         candidate.load_catalog(try_global_catalog()?);
         let candidate = Arc::new(candidate);
 
