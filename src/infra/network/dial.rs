@@ -418,7 +418,10 @@ pub(crate) async fn connect_udp(options: UdpDialOptions) -> Result<UdpSocket> {
     create_connected_udp_socket(socket_addr, &options.socket)
 }
 
-fn create_connected_udp_socket(socket_addr: SocketAddr, options: &SocketOptions) -> Result<UdpSocket> {
+fn create_connected_udp_socket(
+    socket_addr: SocketAddr,
+    options: &SocketOptions,
+) -> Result<UdpSocket> {
     let socket = Socket::new(
         Domain::for_address(socket_addr),
         Type::DGRAM,

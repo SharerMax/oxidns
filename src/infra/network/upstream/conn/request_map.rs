@@ -169,7 +169,7 @@ pub struct RequestMap {
 fn random_id_seed() -> (u16, u16) {
     use std::hash::{BuildHasher, Hasher};
     let mut hasher = ahash::RandomState::new().build_hasher();
-    hasher.write_u64(0x004f_5849_2152_4944);
+    hasher.write_u64(0x004F_5849_2152_4944);
     let bits = hasher.finish();
     ((bits >> 32) as u16, (bits as u16) | 1)
 }
