@@ -363,9 +363,15 @@ where
     F: FnOnce() -> T + Send + 'static,
 {
     let (sender, receiver) = tokio::sync::oneshot::channel();
-    std::thread::spawn(move || {
+    // Run on tokio's bounded blocking pool instead of spawning one unbounded
+    // OS thread per probe: thread creation stays capped (the pool default is
+    // 512 threads) and the caller shuts the runtime down in the background,
+    // so a timed-out getaddrinfo still lingers until the syscall returns
+    // without delaying the command's exit. Dropping the join handle detaches
+    // the task, matching the old thread behavior.
+    drop(tokio::task::spawn_blocking(move || {
         let _ = sender.send(operation());
-    });
+    }));
     match tokio::time::timeout(timeout, receiver).await {
         Ok(Ok(value)) => Ok(value),
         Ok(Err(_)) => Err(BlockingProbeError::Canceled),

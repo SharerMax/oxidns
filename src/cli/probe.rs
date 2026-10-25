@@ -80,6 +80,12 @@ fn run_upstream(options: ProbeUpstreamOptions) -> Result<()> {
     } else {
         print_human_report(&report);
     }
+    // The probe's blocking work (SOCKS5 parsing, system name lookup) runs
+    // detached on tokio's blocking pool, so a stuck resolver call must not
+    // delay the command's exit - that is what the previous detached OS
+    // threads did. Dropping the runtime would instead wait for blocking
+    // tasks to finish, without a bound.
+    runtime.shutdown_background();
     Ok(())
 }
 
