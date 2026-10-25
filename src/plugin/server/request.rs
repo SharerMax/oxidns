@@ -51,6 +51,29 @@ impl RequestHandle {
         let mut context = DnsContext::new(normalize_ipv4_mapped_socket_addr(src_addr), msg);
         self.apply_request_meta(&mut context, meta);
 
+        // Ingress validation: a spoofed response (QR=1) or a non-query
+        // opcode must not run the pipeline, touch the cache, or reach any
+        // upstream; answer REFUSED directly instead.
+        if context.request.message_type() != crate::proto::MessageType::Query
+            || context.request.opcode() != crate::proto::Opcode::Query
+        {
+            debug!(
+                "Dropping non-query ingress from {} (QR=1 or unsupported opcode), id {}",
+                src_addr,
+                context.request.id()
+            );
+            let mut response = context.request.response(Rcode::Refused);
+            Self::finalize_response(&context.request, &mut response);
+            if let (Some(metrics), Some(start_ms)) = (self.metrics.as_ref(), metrics_start) {
+                metrics.on_request_finish(start_ms, RequestExit::Controlled);
+            }
+            return RequestResult {
+                request: context.request,
+                response,
+                exit: RequestExit::Controlled,
+            };
+        }
+
         if event_enabled!(Level::DEBUG) {
             debug!(
                 "DNS request from {}, queries: {:?}, id: {}, edns: {:?}, nameservers: {:?}",
@@ -259,6 +282,37 @@ mod tests {
             context.set_response(context.request.response(Rcode::NXDomain));
             Ok(step)
         }
+    }
+
+    #[tokio::test]
+    async fn test_handle_request_refuses_non_query_ingress() {
+        let observed = Arc::new(Mutex::new(None));
+        let request_handle = make_request_handle(Arc::new(CaptureMetaExecutor {
+            observed: observed.clone(),
+        }));
+        let mut request = make_request(21, "example.com.");
+        request.set_message_type(crate::proto::MessageType::Response);
+
+        let result = request_handle
+            .handle_request(
+                request,
+                SocketAddr::from(([127, 0, 0, 1], 5303)),
+                RequestMeta {
+                    server_name: None,
+                    url_path: None,
+                },
+            )
+            .await;
+
+        assert_eq!(result.response.rcode(), Rcode::Refused);
+        assert_eq!(result.exit, RequestExit::Controlled);
+        assert!(
+            observed
+                .lock()
+                .expect("meta capture lock should not be poisoned")
+                .is_none(),
+            "pipeline must not run for non-query ingress"
+        );
     }
 
     #[tokio::test]
