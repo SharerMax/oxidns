@@ -180,6 +180,9 @@ struct ControlState {
     shutdown_requested: bool,
     reload_pending: bool,
     reload_in_progress: bool,
+    /// Fine-grained phase while a reload is in progress (see
+    /// `ReloadPhase`). `None` outside an in-progress reload.
+    reload_phase: Option<ReloadPhase>,
     last_reload_started_ms: Option<u64>,
     last_reload_completed_ms: Option<u64>,
     last_reload_success_ms: Option<u64>,
@@ -199,11 +202,28 @@ pub struct ControlSnapshot {
     pub reload: ReloadSnapshot,
 }
 
+/// Fine-grained progress of an in-flight reload, exposed via
+/// `/api/reload/status`. Phases follow the staged-reload pipeline
+/// (design-zero-downtime-reload.md): validating/building happen while the
+/// old generation serves; swapping/draining briefly overlap; failed marks
+/// a terminal failure with the phase it reached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReloadPhase {
+    Validating,
+    Building,
+    Swapping,
+    Draining,
+    Failed,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ReloadSnapshot {
     pub status: &'static str,
     pub pending: bool,
     pub in_progress: bool,
+    /// Stage reached by the in-flight (or just-failed) reload.
+    pub phase: Option<ReloadPhase>,
     pub last_started_ms: Option<u64>,
     pub last_completed_ms: Option<u64>,
     pub last_success_ms: Option<u64>,
@@ -355,10 +375,18 @@ impl AppController {
     }
 
     pub fn mark_reload_started(&self, target_version: Option<String>) {
+        self.mark_reload_phase(target_version, ReloadPhase::Validating);
+    }
+
+    /// Record a phase transition for the in-flight reload.
+    pub fn mark_reload_phase(&self, target_version: Option<String>, phase: ReloadPhase) {
         let mut state = self.state.lock().expect("control state poisoned");
         state.reload_pending = false;
         state.reload_in_progress = true;
-        state.last_reload_started_ms = Some(AppClock::elapsed_millis());
+        state.reload_phase = Some(phase);
+        if state.last_reload_started_ms.is_none() {
+            state.last_reload_started_ms = Some(AppClock::elapsed_millis());
+        }
         state.last_reload_error = None;
         state.last_reload_target_version = target_version;
     }
@@ -368,6 +396,7 @@ impl AppController {
         let mut state = self.state.lock().expect("control state poisoned");
         state.reload_pending = false;
         state.reload_in_progress = false;
+        state.reload_phase = None;
         state.last_reload_completed_ms = Some(now);
         state.last_reload_success_ms = Some(now);
         state.last_reload_error = None;
@@ -381,6 +410,9 @@ impl AppController {
         let mut state = self.state.lock().expect("control state poisoned");
         state.reload_pending = false;
         state.reload_in_progress = false;
+        // Keep the phase that failed for diagnosis; snapshot maps it onto
+        // the `failed` status with a `failed` phase marker.
+        state.reload_phase = Some(ReloadPhase::Failed);
         state.last_reload_completed_ms = Some(AppClock::elapsed_millis());
         state.last_reload_error = Some(message.into());
     }
@@ -402,6 +434,7 @@ impl ControlState {
             },
             pending: self.reload_pending,
             in_progress: self.reload_in_progress,
+            phase: self.reload_phase,
             last_started_ms: self.last_reload_started_ms,
             last_completed_ms: self.last_reload_completed_ms,
             last_success_ms: self.last_reload_success_ms,
@@ -455,6 +488,41 @@ mod tests {
         controller.mark_reload_started(None);
         controller.mark_reload_succeeded();
         assert_eq!(controller.reload_snapshot().status, "ok");
+    }
+
+    #[test]
+    fn reload_phase_tracks_progress_and_survives_failure() {
+        let (controller, _rx) = AppController::new("oxidns.yaml".into());
+
+        controller.mark_reload_started(Some("v2".to_string()));
+        let snapshot = controller.reload_snapshot();
+        assert_eq!(snapshot.phase, Some(ReloadPhase::Validating));
+        assert_eq!(snapshot.status, "in_progress");
+
+        controller.mark_reload_phase(Some("v2".to_string()), ReloadPhase::Building);
+        assert_eq!(
+            controller.reload_snapshot().phase,
+            Some(ReloadPhase::Building)
+        );
+
+        // A failure records the phase it died in for diagnosis.
+        controller.mark_reload_failed("candidate build failed");
+        let failed = controller.reload_snapshot();
+        assert_eq!(failed.status, "failed");
+        assert_eq!(failed.phase, Some(ReloadPhase::Failed));
+
+        // A subsequent success clears the phase.
+        controller.mark_reload_started(Some("v3".to_string()));
+        controller.mark_reload_succeeded();
+        let recovered = controller.reload_snapshot();
+        assert_eq!(recovered.status, "ok");
+        assert_eq!(recovered.phase, None);
+    }
+
+    #[test]
+    fn reload_phase_serializes_snake_case() {
+        let json = serde_json::to_string(&ReloadPhase::Building).unwrap();
+        assert_eq!(json, r#""building""#);
     }
 
     #[test]
