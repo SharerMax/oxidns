@@ -1367,6 +1367,86 @@ plugins:
 }
 
 #[tokio::test]
+async fn test_has_cname_config_and_sequence_expressions() -> Result<()> {
+    use oxidns::proto::rdata::CNAME;
+    use oxidns::proto::{RData, Record};
+
+    let config = parse_config(
+        r#"
+plugins:
+  - tag: response_has_cname
+    type: has_cname
+  - tag: seq
+    type: sequence
+    args:
+      - matches: $response_has_cname
+        exec: mark 1
+      - matches: has_cname
+        exec: mark 2
+      - matches: "!$response_has_cname"
+        exec: mark 3
+      - matches: "!has_cname"
+        exec: mark 4
+"#,
+    )?;
+    let registry = plugin::init(config).await?;
+    let matcher = registry
+        .get_plugin("response_has_cname")
+        .expect("has_cname matcher should be registered");
+    assert_eq!(matcher.plugin_type, PluginType::Matcher);
+    assert_eq!(matcher.plugin_name, "has_cname");
+    let sequence = registry
+        .get_plugin("seq")
+        .expect("sequence should exist")
+        .to_executor();
+
+    for has_cname in [false, true] {
+        let mut context = make_context(registry.clone(), "example.com.");
+        if has_cname {
+            let mut response = Message::new();
+            response.add_answer(Record::from_rdata(
+                Name::from_ascii("example.com.")?,
+                60,
+                RData::CNAME(CNAME(Name::from_ascii("target.example.com.")?)),
+            ));
+            context.set_response(response);
+        }
+
+        assert_eq!(matcher.to_matcher().is_match(&mut context), has_cname);
+        assert_eq!(sequence.execute(&mut context).await?, ExecStep::Next);
+        assert_eq!(context.marks().contains(&1), has_cname);
+        assert_eq!(context.marks().contains(&2), has_cname);
+        assert_eq!(context.marks().contains(&3), !has_cname);
+        assert_eq!(context.marks().contains(&4), !has_cname);
+    }
+
+    registry.destroy().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_has_cname_sequence_rejects_parameters() -> Result<()> {
+    let config = parse_config(
+        r#"
+plugins:
+  - tag: seq
+    type: sequence
+    args:
+      - matches: has_cname unexpected
+        exec: accept
+"#,
+    )?;
+    let err = plugin::init(config)
+        .await
+        .expect_err("has_cname quick setup should reject parameters");
+    assert!(
+        err.to_string()
+            .contains("has_cname does not accept parameters")
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_time_matcher_config_and_quick_setup_initialize() -> Result<()> {
     let yaml = r#"
 log:
@@ -2547,6 +2627,152 @@ plugins:
         response.answers()[0].data().ip_addr(),
         Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)))
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_hosts_startup_reports_format_mismatch() -> Result<()> {
+    let tmp_dir = TempDir::new()?;
+    let hosts_file = tmp_dir.path().join("hosts.txt");
+    let file_path = yaml_path(&hosts_file);
+    for (format, rule, suggested) in [
+        ("", "192.0.2.1 example.test alias.test", "standard"),
+        ("format: oxidns", "2001:db8::1 example.test", "standard"),
+        ("format: standard", "example.test 192.0.2.1", "oxidns"),
+    ] {
+        for from_file in [false, true] {
+            let source = if from_file {
+                std::fs::write(&hosts_file, format!("# comment\n{rule}\n"))?;
+                format!("files:\n        - \"{file_path}\"")
+            } else {
+                format!("entries:\n        - \"{rule}\"")
+            };
+            let config = parse_config(&format!(
+                r#"
+log:
+  level: error
+plugins:
+  - tag: local_hosts
+    type: hosts
+    args:
+      {format}
+      {source}
+"#
+            ))?;
+            let error = match plugin::init(config).await {
+                Ok(registry) => {
+                    registry.destroy().await;
+                    panic!("mismatched hosts format should fail startup");
+                }
+                Err(error) => error.to_string(),
+            };
+            assert!(error.contains("format mismatch"), "{error}");
+            assert!(
+                error.contains(&format!("set format: {suggested}")),
+                "{error}"
+            );
+            if from_file {
+                assert!(error.contains("hosts.txt"), "{error}");
+                assert!(error.contains("line 2"), "{error}");
+            } else {
+                assert!(error.contains("args.entries[0]"), "{error}");
+            }
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_udp_server_hosts_standard_format_merges_addresses_and_passes_other_qtypes()
+-> Result<()> {
+    let tmp_dir = TempDir::new()?;
+    let hosts_file = tmp_dir.path().join("hosts.txt");
+    std::fs::write(
+        &hosts_file,
+        "# standard hosts\n192.0.2.11 EXAMPLE.test. alias.test # aliases\n\
+         192.0.2.10 example.test\n2001:db8::10 example.test alias.test\n\
+         2001:db8::11 example.test alias.test\n",
+    )?;
+    let file_path = yaml_path(&hosts_file);
+    let mut registry_and_addr = None;
+    for _ in 0..16 {
+        let listen = reserve_local_udp_addr()?;
+        let yaml = format!(
+            r#"
+log:
+  level: info
+plugins:
+  - tag: hosts
+    type: hosts
+    args:
+      format: standard
+      entries:
+        - "192.0.2.10 example.test alias.test"
+      files:
+        - "{file_path}"
+      short_circuit: true
+  - tag: seq
+    type: sequence
+    args:
+      - exec: $hosts
+      - exec: "reject 2"
+  - tag: udp
+    type: udp_server
+    args:
+      entry: seq
+      listen: "{listen}"
+"#
+        );
+        match plugin::init(parse_config(&yaml)?).await {
+            Ok(registry) => {
+                registry_and_addr = Some((registry, listen));
+                break;
+            }
+            Err(err) if err.to_string().contains("Failed to bind UDP socket") => continue,
+            Err(err) => return Err(err),
+        }
+    }
+    let (registry, listen) =
+        registry_and_addr.expect("UDP server should bind to a local port within retry budget");
+    let responses: Result<Vec<Message>> = async {
+        let mut responses = Vec::new();
+        for (name, qtype) in [
+            ("example.test.", RecordType::A),
+            ("example.test.", RecordType::AAAA),
+            ("alias.test.", RecordType::A),
+            ("alias.test.", RecordType::AAAA),
+            ("example.test.", RecordType::HTTPS),
+            ("example.test.", RecordType::SVCB),
+            ("example.test.", RecordType::TXT),
+            ("www.example.test.", RecordType::A),
+        ] {
+            responses.push(exchange_udp_query_with_qtype(listen, name, qtype).await?);
+        }
+        Ok(responses)
+    }
+    .await;
+    registry.destroy().await;
+    let responses = responses?;
+    for (index, response) in responses.iter().enumerate() {
+        if index < 4 {
+            assert_eq!(response.rcode(), Rcode::NoError);
+            let expected = if index % 2 == 0 {
+                vec!["192.0.2.10", "192.0.2.11"]
+            } else {
+                vec!["2001:db8::10", "2001:db8::11"]
+            };
+            assert_eq!(
+                response.answer_ips(),
+                expected
+                    .into_iter()
+                    .map(|ip| ip.parse::<IpAddr>().unwrap())
+                    .collect::<Vec<_>>()
+            );
+            assert!(response.answers().iter().all(|rr| rr.ttl() == 10));
+        } else {
+            assert_eq!(response.rcode(), Rcode::ServFail);
+        }
+    }
     Ok(())
 }
 

@@ -1,3 +1,8 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Sven Shi
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 import { zhCNPluginDefined } from "../zh-CN/plugin-defined";
 import type { LocaleResourceShape } from "../../types";
 
@@ -637,9 +642,19 @@ export const enUSPluginDefined = {
       description:
         "Directly return static A/AAAA according to domain name rules",
       fields: {
+        format: {
+          label: "Rule format",
+          description:
+            "Choose the rule format for entries and files; defaults to oxidns when omitted.",
+          options: {
+            oxidns: "OxiDNS (domain first)",
+            standard: "Standard hosts (IP first)",
+          },
+        },
         entries: {
           label: "Inline hosts rules",
-          description: "Define inline hosts rules.",
+          description:
+            "The format field selects the syntax; standard uses IP hostname [aliases…].",
           example:
             "router.local 192.168.1.1\nfull:gateway.local 192.168.1.2\ndomain:svc.local 10.0.0.10\nkeyword:nas 192.168.1.20\nregexp:^api[0-9]+\\.corp\\.local$ 10.10.0.5",
         },
@@ -649,7 +664,8 @@ export const enUSPluginDefined = {
         },
         files: {
           label: "hosts file",
-          description: "Specify a list of external hosts rule files.",
+          description:
+            "Load external hosts rule files using the selected format.",
           example: "/etc/oxidns/hosts.txt",
         },
         "files[]": {
@@ -2469,6 +2485,12 @@ export const enUSPluginDefined = {
       quickSetup: {
         paramPlaceholder: "SERVFAIL,NXDOMAIN or 2,3",
       },
+    },
+    has_cname: {
+      name: "Has CNAME",
+      description:
+        "Match when the response Answer section contains a CNAME record",
+      fields: {},
     },
     has_resp: {
       name: "Has Response",

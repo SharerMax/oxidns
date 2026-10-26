@@ -1,3 +1,8 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Sven Shi
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 export const pluginFieldDocs = {
   udp_server: {
     entry:
@@ -125,10 +130,12 @@ export const pluginFieldDocs = {
       "- 类型：`boolean`；必填：否；默认值：`false`\n- 作用：控制在主/备路径选出最终响应后，是否立即停止后续 executor 链。",
   },
   hosts: {
+    format:
+      "- 类型：`string`；必填：否；默认值：`oxidns`\n- 作用：统一选择 entries 和 files 的规则格式。\n- `oxidns`：`<域名规则> <IP> [IP…]`，保留现有匹配前缀与后写覆盖行为。\n- `standard`：`<IP> <主机名> [别名…]`，主机名均精确匹配，不解释匹配前缀；忽略大小写和尾点，同名主机的地址按加载顺序合并去重。\n- 未知格式报错，不自动切换格式。\n- 启动加载时，若规则不符合当前格式但符合另一种格式，错误会提示来源位置、当前格式和建议的 format 值；也可将规则转换为当前格式。",
     entries:
-      "- 类型：`array`；必填：否；默认值：空数组\n- 作用：定义内联 hosts 规则。\n- 规则格式：\n  - `<域名规则> <ip1> <ip2> ...`\n- `<域名规则>` 支持：\n  - `full:`\n  - `domain:`\n  - `keyword:`\n  - `regexp:`\n  - 无前缀域名（按 `full:` 精确匹配处理）",
+      "- 类型：`array`；必填：否；默认值：空数组\n- 作用：定义内联 hosts 规则，格式由 format 决定。\n- `oxidns`：`<域名规则> <IP> [IP…]`，支持 full:、domain:、keyword:、regexp:；无前缀时精确匹配，同一 pattern 后写覆盖。\n- `standard`：`<IP> <主机名> [别名…]`，同名主机合并去重地址，各地址家族保留首次出现顺序；支持空行、空格/Tab 分隔及 # 整行或行尾注释。",
     files:
-      "- 类型：`array`；必填：否；默认值：空数组\n- 作用：指定外部 hosts 规则文件列表。",
+      "- 类型：`array`；必填：否；默认值：空数组\n- 作用：按 format 指定的格式加载外部 hosts 规则文件。\n- 加载顺序：entries 先，再按 files 顺序逐文件逐行加载。standard 跨所有来源合并地址；oxidns 后写覆盖。",
     short_circuit:
       "- 类型：`bool`；必填：否；默认值：`false`\n- 作用：命中并生成本地应答后，是否立即停止后续 executor 链。",
   },
@@ -554,6 +561,9 @@ export const pluginFieldDocs = {
   },
   rcode: {
     args: "`rcode` 的 `args` 为 rcode 列表。\n\n- 类型：`array`；必填：是；默认值：无\n- 作用：定义可命中的响应码集合。\n- 同时支持枚举文本和十进制数值，例如 `NOERROR` / `SERVFAIL` / `NXDOMAIN` 或 `0` / `2` / `3`；同一个列表中可以混用两种格式。\n- 未知或未来扩展响应码可继续使用数值形式匹配。\n- 运行影响：\n  - 仅当上下文中已有响应且 rcode 命中配置集合时返回 `true`。",
+  },
+  has_cname: {
+    args: "无独立配置字段，quick setup 不接受参数。仅检查当前响应 Answer 区是否存在 CNAME，不限制请求 qtype 或响应 RCODE；无响应、空 Answer 或仅 Authority/Additional 含 CNAME 时返回 `false`。建议在上游解析或本地应答之后使用；如需匹配 CNAME 目标域名，请使用 `cname`。",
   },
   has_resp: {
     args: "无独立配置字段。",

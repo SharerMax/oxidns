@@ -3,10 +3,13 @@ title: Policy Orchestration
 ---
 
 import Admonition from "@theme/Admonition";
+import PluginAvailability from "@site/src/components/PluginAvailability";
 
 `sequence` and `fallback` define branching, sub-chain calls, and primary/fallback execution.
 
 ## `sequence`
+
+<PluginAvailability from="minimal" />
 
 ### Purpose
 
@@ -133,6 +136,8 @@ Besides plugin calls, `sequence.args[].exec` can also use built-in control flow:
 ---
 
 ## `fallback`
+
+<PluginAvailability from="minimal" />
 
 ### Purpose
 
