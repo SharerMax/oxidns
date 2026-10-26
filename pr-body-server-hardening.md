@@ -1,14 +1,14 @@
 # PR:fix(server): ingress validation, framing, and drain hardening
 
-**目标分支**:svenshi/oxidns `main`
-**来源分支**:SharerMax/oxidns `fix/server-hardening`(8 个提交)
+**目标分支**:svenshi/oxidns `release/v1.7.0`
+**来源分支**:SharerMax/oxidns `fix/server-hardening`(8 个提交,已合入 `release/v1.7.0` 基线)
 **创建命令**:
 
 ```bash
 gh pr create \
   --repo svenshi/oxidns \
   --head SharerMax:fix/server-hardening \
-  --base main \
+  --base release/v1.7.0 \
   --title "fix(server): ingress validation, framing, and drain hardening" \
   --body-file pr-body-server-hardening.md
 ```
@@ -28,6 +28,10 @@ DNS 服务面的八项加固与修复,均由代码评审发现,互相独立:
 7. **fallback `threshold: 0` 语义**——`0` 原被静默改写为 500ms,希望立即待命的配置无法生效;现在 500 作为 serde 默认值,显式 `0` 立即启动备用路径(文档同步)。备用路径闸门的 `select!` 加 `biased`,主路径已成功时不再多打一次会被中止的备用查询。
 8. **UDP 预检前移到 spawn 之前**——第 3 项的校验原先在每包任务的闭包内,垃圾包洪泛仍要为每个数据报付任务创建成本;现在解码后立即丢弃,`handle_request` 保留同样的校验以覆盖流式服务器。
 
+## 合入基线
+
+分支已合入 `origin/release/v1.7.0`(`52ae666c`,合并提交 `337c3eed`),因此相对目标分支的 diff 只有下列 8 个提交。该基线已包含管理 API 系列(#401),不包含本系列;合并仅自动处理了 `docs/.../control-flow.mdx` 一处文档上下文,服务代码无重叠。
+
 ## 提交
 
 | 提交 | 内容 |
@@ -44,8 +48,8 @@ DNS 服务面的八项加固与修复,均由代码评审发现,互相独立:
 ## 测试
 
 - 新增:`test_handle_request_refuses_non_query_ingress`、`test_handle_request_answers_badvers_for_unsupported_edns_version`;均断言响应 rcode 且执行链未被调用。
-- 全量 `cargo test --all-features`:1200(lib)+ 5 + 100(集成)= **1305 项通过**,0 失败,2 ignored。
-- 门禁:`cargo +nightly fmt --all --check` 干净;`cargo +nightly clippy --all-targets --all-features -- -D warnings` 在本系列触及的文件上无告警。
+- 全量 `cargo test --all-features`(合并基线后):1237(lib)+ 5 + 104(集成)= **1346 项通过**,0 失败,3 ignored。
+- 门禁:`cargo +nightly fmt --all --check` 干净;`cargo +nightly clippy --all-targets --all-features -- -D warnings` 仅剩 `src/infra/network/dial.rs:483` 一处基线既有的 `needless_bool`(本系列触及文件无告警)。
 
 ## 影响面
 
@@ -55,4 +59,4 @@ DNS 服务面的八项加固与修复,均由代码评审发现,互相独立:
 
 ## 已知事项
 
-- 本系列不携带 `87cad1b2`(Windows nightly 的 rustfmt/clippy 修补),因此 `src/infra/upgrade/mod.rs:287`(unused import)与 `src/infra/network/dial.rs:483`(`needless_bool`)在 Windows nightly clippy 上仍是 **main 既有**告警;与本系列无关,不影响 Linux CI。
+- 本系列不携带 `87cad1b2`(Windows nightly 的 rustfmt/clippy 修补)。合并基线后,Windows nightly clippy 只剩 `src/infra/network/dial.rs:483`(`needless_bool`)一处基线告警(原 `src/infra/upgrade/mod.rs:287` 的 unused import 已由基线修复),不影响 Linux CI。
