@@ -451,27 +451,33 @@ async fn handle_reload_command(
         }
     }
 
-    controller.mark_reload_phase(None, ReloadPhase::Swapping);
-    bootstrap::stop(assembly).await;
-    task::stop_all().await;
+    // Non-Unix: replace the running generation in place. On Unix the staged
+    // path above always returns, so compile this stop-the-world fallback (and
+    // its Swapping transition) only for non-Unix builds.
+    #[cfg(not(unix))]
+    {
+        controller.mark_reload_phase(None, ReloadPhase::Swapping);
+        bootstrap::stop(assembly).await;
+        task::stop_all().await;
 
-    match bootstrap::assemble(&candidate_config, Some(controller.clone())).await {
-        Ok(new_assembly) => {
-            *assembly = new_assembly;
-            *current_config = candidate_config;
-            controller.mark_reload_succeeded();
-            info!("Configuration reload completed successfully");
-            Ok(())
-        }
-        Err(reload_err) => {
-            finish_rollback(
-                assembly,
-                current_config,
-                previous_config,
-                &controller,
-                reload_err,
-            )
-            .await
+        match bootstrap::assemble(&candidate_config, Some(controller.clone())).await {
+            Ok(new_assembly) => {
+                *assembly = new_assembly;
+                *current_config = candidate_config;
+                controller.mark_reload_succeeded();
+                info!("Configuration reload completed successfully");
+                Ok(())
+            }
+            Err(reload_err) => {
+                finish_rollback(
+                    assembly,
+                    current_config,
+                    previous_config,
+                    &controller,
+                    reload_err,
+                )
+                .await
+            }
         }
     }
 }
