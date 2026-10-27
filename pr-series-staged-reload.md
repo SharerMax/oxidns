@@ -1,7 +1,7 @@
 # PR 系列:Staged Reload(零停机热重载)
 
 对应设计:`design-zero-downtime-reload.md`(PR-A/B/C/D 全部落地)
-基线:分支 `fix/code-review-priorities`,系列 3 个 PR、4 个提交,自低风险纯重构起步,逐步引入行为变更。其中 `cd9881f4` 是第 2 项内的 API 路由回归修复。
+基线:分支 `fix/code-review-priorities`,系列 3 个 PR、5 个提交,自低风险纯重构起步,逐步引入行为变更。其中 `cd9881f4` 是第 2 项内的 API 路由回归修复,`03ac4154` 是第 3 项后的编译告警修复。
 建议 PR 标题:`feat(reload): staged zero-downtime configuration reload`
 
 ## 提交清单(按边界,依序 cherry-pick)
@@ -12,6 +12,7 @@
 | 2 | `36b27388` | feat(reload): staged zero-downtime reload on Unix (design PR-B) | 行为变更(Unix 路径) | 1 |
 | 2a | `cd9881f4` | fix(api): register plugin routes on staged candidate hub | 回归修复(第 2 项的两相边界) | 2 |
 | 3 | `b7c93320` | feat(control): expose reload phase in /reload/status (design PR-D) | 可观测,独立可用 | 2(phase 语义) |
+| 3a | `03ac4154` | fix(reload): gate stop-the-world fallback to non-Unix | 编译告警修复(第 3 项 fallback) | 3 |
 
 包含的非本次系列核心提交(混入在分支其它位置,拆 PR 时随第 2 项一并带上):
 
@@ -32,6 +33,12 @@ staged reload 把 `install_global_api` 推迟到 `activate_assembly` 后,插件 
 - `activate_assembly` 仍会安装同一个 hub,内置路由与 runtime control 路由随后注册。
 
 涉及文件:`src/app/bootstrap.rs`、`src/api/global.rs`、`src/api/mod.rs`;`src/api/hub.rs` 仅增加 `#[cfg(test)] has_route` 断言辅助。该修复作为独立提交 `cd9881f4` 落在第 2 项之后;若希望第 2 项保持单提交,可在 cherry-pick 后 squash 进 `36b27388`。
+
+## 编译告警修复(`03ac4154`)
+
+Unix staged 路径的 match 所有分支都会返回,导致其后的 stop-the-world 回退在 Unix 构建中不可达。`03ac4154` 用 `#[cfg(not(unix))]` 将该回退(含 `Swapping` 标记)仅编译进非 Unix 构建;Unix 的 `Swapping` 仍由 `reload_staged` 标记,运行时行为不变。
+
+修复后 aarch64-musl `cargo check` 不再出现 `unreachable statement` 警告,Windows host check、nightly fmt、all-features clippy 均通过。涉及文件:`src/app.rs`。该提交的补丁上下文包含第 3 项(`b7c93320`)加入的 `Swapping` 标记,应在 `b7c93320` 之后 cherry-pick;若希望第 3 项保持单提交,可在 cherry-pick 后 squash 进 `b7c93320`(哈希会变化)。
 
 ## PR 描述要点
 
@@ -59,11 +66,12 @@ git cherry-pick 72637c47
 git cherry-pick 36b27388
 git cherry-pick cd9881f4
 git cherry-pick b7c93320
+git cherry-pick 03ac4154
 git push upstream-or-fork feat/staged-reload
 ```
 
 注意:
 
-- `36b27388` 的 diff 含 `metrics.rs`(分代注册)与 `listen.rs`(UDP reuseport)的变更,与本系列自洽;文件面为 `app.rs`(+130,重载分派)、`app/bootstrap.rs`(prepare/activate 两相)、`listen.rs`、`observability/metrics.rs`、`plugin/{mod.rs,registry/{mod.rs,runtime.rs}}`——与 semaphore 系列(只动 `infra/network/upstream/pool/*`)**冲突面为空**。API 路由回归修复由 `cd9881f4` 承载,额外涉及 `app/bootstrap.rs` 与 `api/{global.rs,mod.rs}`(`api/hub.rs` 仅测试辅助),应在 `36b27388` 之后、`b7c93320` 之前 cherry-pick;若改为 squash,则用 squash 后的提交替换 `cd9881f4`。
+- `36b27388` 的 diff 含 `metrics.rs`(分代注册)与 `listen.rs`(UDP reuseport)的变更,与本系列自洽;文件面为 `app.rs`(+130,重载分派)、`app/bootstrap.rs`(prepare/activate 两相)、`listen.rs`、`observability/metrics.rs`、`plugin/{mod.rs,registry/{mod.rs,runtime.rs}}`——与 semaphore 系列(只动 `infra/network/upstream/pool/*`)**冲突面为空**。API 路由回归修复由 `cd9881f4` 承载,额外涉及 `app/bootstrap.rs` 与 `api/{global.rs,mod.rs}`(`api/hub.rs` 仅测试辅助),应在 `36b27388` 之后、`b7c93320` 之前 cherry-pick;若改为 squash,则用 squash 后的提交替换 `cd9881f4`。编译告警修复由 `03ac4154` 承载,只动 `src/app.rs`,必须在 `b7c93320` 之后 cherry-pick;同样可 squash 进 `b7c93320`,此时需同步更新相关哈希。
 - `72637c47` 同时被 semaphore 系列需要(其 S4 的 cfg 统一针对本提交引入的 `build_registry`),先合入本系列,semaphore 系列基于其后再 cherry-pick 即可。
 - phase 可观测完整落在本系列的 `b7c93320`(`control.rs` + `app.rs`),不需要从 `3e3db421` 携带任何东西。
