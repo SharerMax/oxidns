@@ -1,7 +1,7 @@
 # PR 系列:Staged Reload(零停机热重载)
 
 对应设计:`design-zero-downtime-reload.md`(PR-A/B/C/D 全部落地)
-基线:分支 `fix/code-review-priorities`,系列 3 个提交,自低风险纯重构起步,逐步引入行为变更。另有 1 个待提交的 API 路由回归修复,建议 squash 进第 2 项或作为紧随其后的 `fix(api)` 提交。
+基线:分支 `fix/code-review-priorities`,系列 3 个 PR、4 个提交,自低风险纯重构起步,逐步引入行为变更。其中 `cd9881f4` 是第 2 项内的 API 路由回归修复。
 建议 PR 标题:`feat(reload): staged zero-downtime configuration reload`
 
 ## 提交清单(按边界,依序 cherry-pick)
@@ -10,6 +10,7 @@
 |---|---|---|---|---|
 | 1 | `72637c47` | refactor(plugin): split runtime build from install | 纯重构,行为不变 | 无 |
 | 2 | `36b27388` | feat(reload): staged zero-downtime reload on Unix (design PR-B) | 行为变更(Unix 路径) | 1 |
+| 2a | `cd9881f4` | fix(api): register plugin routes on staged candidate hub | 回归修复(第 2 项的两相边界) | 2 |
 | 3 | `b7c93320` | feat(control): expose reload phase in /reload/status (design PR-D) | 可观测,独立可用 | 2(phase 语义) |
 
 包含的非本次系列核心提交(混入在分支其它位置,拆 PR 时随第 2 项一并带上):
@@ -19,7 +20,7 @@
 - `src/app.rs` 重载分派与 phase 标记(36b27388 / b7c93320 内);
 - 状态机测试与 serde 格式(b7c93320 内)。
 
-## 追加修复(建议并入第 2 项)
+## 追加修复(`cd9881f4`)
 
 staged reload 把 `install_global_api` 推迟到 `activate_assembly` 后,插件 `init()` 中的 `register_plugin_api!` 在首次启动时因全局 register 尚为 `None` 而全部变成 no-op;staged reload 时则可能注册进旧 hub 或触发重复路由。结果是 `cache`、`query_recorder`、`cron`、`download` 等所有 `/api/plugins/<tag>/*` 接口返回 404。
 
@@ -30,7 +31,7 @@ staged reload 把 `install_global_api` 推迟到 `activate_assembly` 后,插件 
 - staging 失败时恢复旧 generation 的 register,保持“候选失败零影响”;
 - `activate_assembly` 仍会安装同一个 hub,内置路由与 runtime control 路由随后注册。
 
-涉及文件:`src/app/bootstrap.rs`、`src/api/global.rs`、`src/api/mod.rs`;`src/api/hub.rs` 仅增加 `#[cfg(test)] has_route` 断言辅助。
+涉及文件:`src/app/bootstrap.rs`、`src/api/global.rs`、`src/api/mod.rs`;`src/api/hub.rs` 仅增加 `#[cfg(test)] has_route` 断言辅助。该修复作为独立提交 `cd9881f4` 落在第 2 项之后;若希望第 2 项保持单提交,可在 cherry-pick 后 squash 进 `36b27388`。
 
 ## PR 描述要点
 
@@ -44,7 +45,7 @@ staged reload 把 `install_global_api` 推迟到 `activate_assembly` 后,插件 
 
 **影响面**:默认行为在 Unix 上变为零停机;非 Unix 不变。后台任务无需协调(插件自管 task-center 句柄并在 destroy 停止)。
 
-**测试**:新增 staged 指标分代测试(旧代注销不误删候选、失败候选零残留)、reload phase 状态机与 serde 测试;本次追加修复新增 2 项 API 路由回归测试(`prepare_assembly` 期间路由进入候选 hub、staged reload 前后旧/新 hub 路由均存在),不占用固定端口;已通过定向测试、nightly fmt 与 all-features clippy;原系列全量 1322 项通过,追加用例后全量套件交由 CI 复核。
+**测试**:新增 staged 指标分代测试(旧代注销不误删候选、失败候选零残留)、reload phase 状态机与 serde 测试;`cd9881f4` 新增 2 项 API 路由回归测试(`prepare_assembly` 期间路由进入候选 hub、staged reload 前后旧/新 hub 路由均存在),不占用固定端口;已通过定向测试、nightly fmt 与 all-features clippy;原系列全量 1322 项通过,追加用例后全量套件交由 CI 复核。
 
 **风险与回退**:候选 init 期间的出站拨号看到的是上一代 profile(文档化取舍);Windows 保持旧行为;如需紧急回退,重载分派是独立 `#[cfg(unix)]` 分支,可直接摘除。
 
@@ -56,14 +57,13 @@ staged reload 把 `install_global_api` 推迟到 `activate_assembly` 后,插件 
 git checkout -b feat/staged-reload main
 git cherry-pick 72637c47
 git cherry-pick 36b27388
+git cherry-pick cd9881f4
 git cherry-pick b7c93320
-# 若 API 路由回归修复未 squash 进 36b27388:
-# git cherry-pick <fix-api-routes-commit>
 git push upstream-or-fork feat/staged-reload
 ```
 
 注意:
 
-- `36b27388` 的 diff 含 `metrics.rs`(分代注册)与 `listen.rs`(UDP reuseport)的变更,与本系列自洽;文件面为 `app.rs`(+130,重载分派)、`app/bootstrap.rs`(prepare/activate 两相)、`listen.rs`、`observability/metrics.rs`、`plugin/{mod.rs,registry/{mod.rs,runtime.rs}}`——与 semaphore 系列(只动 `infra/network/upstream/pool/*`)**冲突面为空**。追加修复仍落在同一两相边界内,额外涉及 `app/bootstrap.rs` 与 `api/{global.rs,mod.rs}`(`api/hub.rs` 仅测试辅助);若单独成提交,应在 `36b27388` 之后 cherry-pick。
+- `36b27388` 的 diff 含 `metrics.rs`(分代注册)与 `listen.rs`(UDP reuseport)的变更,与本系列自洽;文件面为 `app.rs`(+130,重载分派)、`app/bootstrap.rs`(prepare/activate 两相)、`listen.rs`、`observability/metrics.rs`、`plugin/{mod.rs,registry/{mod.rs,runtime.rs}}`——与 semaphore 系列(只动 `infra/network/upstream/pool/*`)**冲突面为空**。API 路由回归修复由 `cd9881f4` 承载,额外涉及 `app/bootstrap.rs` 与 `api/{global.rs,mod.rs}`(`api/hub.rs` 仅测试辅助),应在 `36b27388` 之后、`b7c93320` 之前 cherry-pick;若改为 squash,则用 squash 后的提交替换 `cd9881f4`。
 - `72637c47` 同时被 semaphore 系列需要(其 S4 的 cfg 统一针对本提交引入的 `build_registry`),先合入本系列,semaphore 系列基于其后再 cherry-pick 即可。
 - phase 可观测完整落在本系列的 `b7c93320`(`control.rs` + `app.rs`),不需要从 `3e3db421` 携带任何东西。
