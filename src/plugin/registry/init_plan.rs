@@ -130,10 +130,13 @@ pub(super) fn build_create_contexts(
                     .then_with(|| a.field.cmp(&b.field))
                     .then_with(|| a.plugin_type.cmp(&b.plugin_type))
             });
-            (tag, PluginCreateContext {
-                dependents,
-                candidate: false,
-            })
+            (
+                tag,
+                PluginCreateContext {
+                    dependents,
+                    candidate: false,
+                },
+            )
         })
         .collect()
 }
