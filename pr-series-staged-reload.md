@@ -1,7 +1,7 @@
 # PR 系列:Staged Reload(零停机热重载)
 
 对应设计:`design-zero-downtime-reload.md`(PR-A/B/C/D 全部落地)
-基线:分支 `fix/code-review-priorities`,系列 3 个提交,自低风险纯重构起步,逐步引入行为变更。
+基线:分支 `fix/code-review-priorities`,系列 3 个提交,自低风险纯重构起步,逐步引入行为变更。另有 1 个待提交的 API 路由回归修复,建议 squash 进第 2 项或作为紧随其后的 `fix(api)` 提交。
 建议 PR 标题:`feat(reload): staged zero-downtime configuration reload`
 
 ## 提交清单(按边界,依序 cherry-pick)
@@ -19,6 +19,19 @@
 - `src/app.rs` 重载分派与 phase 标记(36b27388 / b7c93320 内);
 - 状态机测试与 serde 格式(b7c93320 内)。
 
+## 追加修复(建议并入第 2 项)
+
+staged reload 把 `install_global_api` 推迟到 `activate_assembly` 后,插件 `init()` 中的 `register_plugin_api!` 在首次启动时因全局 register 尚为 `None` 而全部变成 no-op;staged reload 时则可能注册进旧 hub 或触发重复路由。结果是 `cache`、`query_recorder`、`cron`、`download` 等所有 `/api/plugins/<tag>/*` 接口返回 404。
+
+修复:
+
+- `prepare_assembly` 在 `stage_runtime` 之前安装候选 API hub,使插件初始化期注册的 scoped route 直接进入候选 hub;
+- 候选配置没有 API 时显式 `clear_global_api()`,避免候选插件把路由重复注册到旧 hub;
+- staging 失败时恢复旧 generation 的 register,保持“候选失败零影响”;
+- `activate_assembly` 仍会安装同一个 hub,内置路由与 runtime control 路由随后注册。
+
+涉及文件:`src/app/bootstrap.rs`、`src/api/global.rs`、`src/api/mod.rs`;`src/api/hub.rs` 仅增加 `#[cfg(test)] has_route` 断言辅助。
+
 ## PR 描述要点
 
 **动机**:重载是 stop-the-world:先全量拆除(API、插件、监听器)再重建,存在数百毫秒到数秒的拒连窗口;候选配置任何失败都会先经历一次真实拆除再回滚。
@@ -26,12 +39,12 @@
 **方案**:Build → Swap → Drain。
 
 - PR1 把 `PluginRuntimeManager::init_runtime` 拆为 `retire_previous_runtime` / `install_outbound_profiles` / `build_registry` / `install_runtime`,`PluginCreateContext` 增加 `candidate` 标志(暂无消费者)——纯重构。
-- PR2 引入 `prepare_assembly` / `activate_assembly` 两相:候选运行时在旧代继续服务时离线构建(server 插件 init 内绑端口,UDP/TCP `SO_REUSEPORT` 双绑共存);指标注册进入旁路 staging(flush 不去重、旧代注销摘最旧同 tag、渲染按 tag 保留最新);Unix 重载走 staged 路径,候选失败零影响,提交后才失败才退回经典回滚;非 Unix 保持原 stop-the-world。
+- PR2 引入 `prepare_assembly` / `activate_assembly` 两相:候选运行时在旧代继续服务时离线构建(server 插件 init 内绑端口,UDP/TCP `SO_REUSEPORT` 双绑共存);候选 API hub 在插件初始化前安装,确保插件 scoped route 进入候选 hub;指标注册进入旁路 staging(flush 不去重、旧代注销摘最旧同 tag、渲染按 tag 保留最新);Unix 重载走 staged 路径,候选失败零影响,提交后才失败才退回经典回滚;非 Unix 保持原 stop-the-world。
 - PR3 给 `/api/reload/status` 增加 `phase`(`validating → building → swapping`,失败保留 `failed`,成功清空),snake_case 序列化。
 
 **影响面**:默认行为在 Unix 上变为零停机;非 Unix 不变。后台任务无需协调(插件自管 task-center 句柄并在 destroy 停止)。
 
-**测试**:新增 staged 指标分代测试(旧代注销不误删候选、失败候选零残留)、reload phase 状态机与 serde 测试;全量 1322 项测试通过;clippy full/minimal/standard 干净。
+**测试**:新增 staged 指标分代测试(旧代注销不误删候选、失败候选零残留)、reload phase 状态机与 serde 测试;本次追加修复新增 2 项 API 路由回归测试(`prepare_assembly` 期间路由进入候选 hub、staged reload 前后旧/新 hub 路由均存在),不占用固定端口;已通过定向测试、nightly fmt 与 all-features clippy;原系列全量 1322 项通过,追加用例后全量套件交由 CI 复核。
 
 **风险与回退**:候选 init 期间的出站拨号看到的是上一代 profile(文档化取舍);Windows 保持旧行为;如需紧急回退,重载分派是独立 `#[cfg(unix)]` 分支,可直接摘除。
 
@@ -44,11 +57,13 @@ git checkout -b feat/staged-reload main
 git cherry-pick 72637c47
 git cherry-pick 36b27388
 git cherry-pick b7c93320
+# 若 API 路由回归修复未 squash 进 36b27388:
+# git cherry-pick <fix-api-routes-commit>
 git push upstream-or-fork feat/staged-reload
 ```
 
 注意:
 
-- `36b27388` 的 diff 含 `metrics.rs`(分代注册)与 `listen.rs`(UDP reuseport)的变更,与本系列自洽;文件面为 `app.rs`(+130,重载分派)、`app/bootstrap.rs`(prepare/activate 两相)、`listen.rs`、`observability/metrics.rs`、`plugin/{mod.rs,registry/{mod.rs,runtime.rs}}`——与 semaphore 系列(只动 `infra/network/upstream/pool/*`)**冲突面为空**。
+- `36b27388` 的 diff 含 `metrics.rs`(分代注册)与 `listen.rs`(UDP reuseport)的变更,与本系列自洽;文件面为 `app.rs`(+130,重载分派)、`app/bootstrap.rs`(prepare/activate 两相)、`listen.rs`、`observability/metrics.rs`、`plugin/{mod.rs,registry/{mod.rs,runtime.rs}}`——与 semaphore 系列(只动 `infra/network/upstream/pool/*`)**冲突面为空**。追加修复仍落在同一两相边界内,额外涉及 `app/bootstrap.rs` 与 `api/{global.rs,mod.rs}`(`api/hub.rs` 仅测试辅助);若单独成提交,应在 `36b27388` 之后 cherry-pick。
 - `72637c47` 同时被 semaphore 系列需要(其 S4 的 cfg 统一针对本提交引入的 `build_registry`),先合入本系列,semaphore 系列基于其后再 cherry-pick 即可。
 - phase 可观测完整落在本系列的 `b7c93320`(`control.rs` + `app.rs`),不需要从 `3e3db421` 携带任何东西。

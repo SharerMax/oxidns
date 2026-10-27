@@ -6,7 +6,10 @@
 use std::sync::Arc;
 
 #[cfg(feature = "api")]
-use crate::api::{self, ApiHub, ApiRegister, clear_global_api, install_global_api};
+use crate::api::{
+    self, ApiHub, ApiRegister, clear_global_api, global_api_register, install_global_api,
+    restore_global_api,
+};
 use crate::config::types::Config;
 use crate::infra::control::AppController;
 use crate::infra::error::Result;
@@ -51,6 +54,17 @@ pub async fn prepare_assembly(
 
     #[cfg(feature = "api")]
     let api_hub = ApiHub::from_config(&config.api)?;
+    #[cfg(feature = "api")]
+    let previous_api_register = global_api_register();
+    #[cfg(feature = "api")]
+    if let Some(api_hub) = &api_hub {
+        // Plugins register their scoped routes from `init()`. Publish the
+        // candidate hub first so those routes land in the hub that will be
+        // started on activation instead of the previous generation's hub.
+        install_global_api(api_hub.clone());
+    } else {
+        clear_global_api();
+    }
     #[cfg(not(feature = "api"))]
     if config.api.http.is_some() {
         tracing::warn!(
@@ -69,6 +83,8 @@ pub async fn prepare_assembly(
     let runtime = match plugin::stage_runtime(config.clone()).await {
         Ok(runtime) => runtime,
         Err(err) => {
+            #[cfg(feature = "api")]
+            restore_global_api(previous_api_register);
             // The controller only belongs to a caller that had none (fresh
             // startup); a reload shares it with the still-serving assembly.
             if controller.is_none() {
@@ -164,7 +180,9 @@ mod tests {
         ApiHub, ApiRegister, global_api_register, global_api_test_guard,
         set_global_api_register_for_test,
     };
-    use crate::config::types::{ApiConfig, ApiHttpConfig, LogConfig, NetworkConfig, RuntimeConfig};
+    use crate::config::types::{
+        ApiConfig, ApiHttpConfig, LogConfig, NetworkConfig, PluginConfig, RuntimeConfig,
+    };
     use crate::infra::clock::AppClock;
 
     #[tokio::test]
@@ -196,6 +214,111 @@ mod tests {
         assert!(global_api_register().is_none());
 
         stop(&assembly).await;
+    }
+
+    #[tokio::test]
+    async fn prepare_assembly_registers_plugin_scoped_api_routes() {
+        let _guard = global_api_test_guard().await;
+        AppClock::start();
+        clear_global_api();
+        plugin::reset_runtime_for_test().await;
+        #[cfg(debug_assertions)]
+        plugin::enable_runtime_test_serialization();
+
+        let staged = prepare_assembly(
+            &Config {
+                include: Vec::new(),
+                runtime: RuntimeConfig::default(),
+                api: ApiConfig {
+                    http: Some(ApiHttpConfig::Listen("127.0.0.1:0".to_string())),
+                },
+                log: LogConfig::default(),
+                network: NetworkConfig::default(),
+                plugins: vec![PluginConfig {
+                    tag: "dns_cache".to_string(),
+                    plugin_type: "cache".to_string(),
+                    args: None,
+                }],
+            },
+            None,
+        )
+        .await
+        .expect("cache assembly should stage");
+
+        let api_hub = staged.api_hub.as_ref().expect("api hub should exist");
+        assert!(
+            api_hub.has_route(&http::Method::GET, "/plugins/dns_cache/entries"),
+            "plugin-scoped cache route should be registered during plugin init"
+        );
+
+        staged.runtime.destroy().await;
+        plugin::destroy_runtime().await;
+        clear_global_api();
+    }
+
+    #[tokio::test]
+    async fn staged_reload_registers_plugin_scoped_routes_on_the_candidate_hub() {
+        let _guard = global_api_test_guard().await;
+        AppClock::start();
+        clear_global_api();
+        plugin::reset_runtime_for_test().await;
+        #[cfg(debug_assertions)]
+        plugin::enable_runtime_test_serialization();
+
+        let config = Config {
+            include: Vec::new(),
+            runtime: RuntimeConfig::default(),
+            api: ApiConfig {
+                http: Some(ApiHttpConfig::Listen("127.0.0.1:0".to_string())),
+            },
+            log: LogConfig::default(),
+            network: NetworkConfig::default(),
+            plugins: vec![PluginConfig {
+                tag: "dns_cache".to_string(),
+                plugin_type: "cache".to_string(),
+                args: None,
+            }],
+        };
+
+        let old_assembly = assemble(&config, None)
+            .await
+            .expect("initial assembly should start");
+        let old_hub = old_assembly
+            .api_hub
+            .as_ref()
+            .expect("old api hub should exist");
+
+        let staged = prepare_assembly(&config, None)
+            .await
+            .expect("candidate should stage with the plugin route already registered");
+        let candidate_hub = staged
+            .api_hub
+            .as_ref()
+            .expect("candidate api hub should exist");
+
+        assert!(
+            old_hub.has_route(&http::Method::GET, "/plugins/dns_cache/entries"),
+            "live generation should keep its plugin route while the candidate is staged"
+        );
+        assert!(
+            candidate_hub.has_route(&http::Method::GET, "/plugins/dns_cache/entries"),
+            "candidate hub should receive the plugin route during staging"
+        );
+
+        stop(&old_assembly).await;
+        let new_assembly = activate_assembly(staged, None)
+            .await
+            .expect("candidate should activate");
+        let new_hub = new_assembly
+            .api_hub
+            .as_ref()
+            .expect("new api hub should exist");
+        assert!(
+            new_hub.has_route(&http::Method::GET, "/plugins/dns_cache/entries"),
+            "candidate hub should serve the plugin-scoped route after activation"
+        );
+
+        stop(&new_assembly).await;
     }
 }
 

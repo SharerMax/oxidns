@@ -34,6 +34,16 @@ pub fn clear_global_api() {
     set_global_api_register(None);
 }
 
+/// Restore a previously captured API register, or clear the slot when
+/// `register` is `None`.
+///
+/// Staged assembly installs the candidate hub before plugin initialization so
+/// plugin-scoped routes land in the candidate. If staging fails, this restores
+/// the live generation's registration.
+pub(crate) fn restore_global_api(register: Option<ApiRegister>) {
+    set_global_api_register(register);
+}
+
 #[cfg(test)]
 pub(crate) fn set_global_api_register_for_test(register: Option<ApiRegister>) {
     set_global_api_register(register);
