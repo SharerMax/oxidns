@@ -364,6 +364,15 @@ impl ApiHub {
         Ok(())
     }
 
+    #[cfg(test)]
+    pub(crate) fn has_route(&self, method: &Method, path: &str) -> bool {
+        let key = RouteKey::new(method.clone(), path.to_string());
+        self.routes
+            .lock()
+            .map(|routes| routes.contains_key(&key))
+            .unwrap_or(false)
+    }
+
     pub fn register_prefix_route(
         &self,
         method: Method,

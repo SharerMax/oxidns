@@ -48,6 +48,7 @@ use std::sync::Arc;
 pub(super) use auth::is_authorized;
 #[cfg(test)]
 pub(crate) use global::global_api_test_guard;
+pub(crate) use global::restore_global_api;
 #[cfg(test)]
 pub(crate) use global::set_global_api_register_for_test;
 pub use global::{clear_global_api, global_api_register, install_global_api};
