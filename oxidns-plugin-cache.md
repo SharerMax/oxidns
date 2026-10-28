@@ -23,13 +23,13 @@
 | 能力 | 实现位置 |
 |---|---|
 | normalized qname + qtype/qclass/DO/CD(+ECS) 键 | `key.rs:128-152` |
-| fresh / stale / expired / miss 四态判定 | `mod.rs:915-1056` |
-| 命中可选短路（`short_circuit`） | `mod.rs:1059-1069`、`1531-1533` |
-| 冷/过期 miss 的 single-flight 合并 | `mod.rs:1192-1214`、`1476-1511` |
-| stale 命中后台异步刷新（去重、5s 超时） | `mod.rs:1216-1352` |
-| 正/负缓存 TTL 策略 | `mod.rs:1072-1150`、`1596-1671` |
-| ECS 跨客户端污染防护 | `mod.rs:1589-1594` |
-| 采样 LRU + 分层水位淘汰 | `mod.rs:721-879` |
+| fresh / stale / expired / miss 四态判定 | `mod.rs:941-1082` |
+| 命中可选短路（`short_circuit`） | `mod.rs:1085-1095`、`1575-1577` |
+| 冷/过期 miss 的 single-flight 合并 | `mod.rs:1218-1240`、`1502-1556` |
+| stale 命中后台异步刷新（去重、5s 超时） | `mod.rs:1242-1378` |
+| 正/负缓存 TTL 策略 | `mod.rs:1098-1176`、`1640-1715` |
+| ECS 跨客户端污染防护 | `mod.rs:1633-1638` |
+| 采样 LRU + 分层水位淘汰 | `mod.rs:747-905` |
 | wincode dump/load 持久化 | `persistence.rs` |
 | 插件 API（条目/清空/导出/导入） | `api.rs` |
 
@@ -46,7 +46,7 @@
 
 | 结构 | 关键点 |
 |---|---|
-| `CacheConfig` | 全部字段 `Option<T>`，缺省值在 `build_cache` 中落地（`mod.rs:1862-1888`） |
+| `CacheConfig` | 全部字段 `Option<T>`，缺省值在 `build_cache` 中落地（`mod.rs:1924-1959`） |
 | `Cache` | 不可变配置 + `OnceCell<CacheMap>` + 原子计数 + 两个 `Mutex` 集合（single-flight / lazy 去重） |
 | `CacheItem` | `resp: Message`、`ttl`（原始计算值）、`fresh_until_ms`、`validation` |
 | `CacheKey` | `domain`（小写、去尾点）、`record_type`、`dns_class`、`do_bit`、`cd_bit`、`Option<EcsScopeDigest>` |
@@ -81,11 +81,11 @@ flowchart LR
 
 要点：
 
-- 缓存 map 在 `init` 中创建并写入 `OnceCell`，因为 API 注册需要同一个 `CacheMap` 句柄（`mod.rs:1361-1374`）。
-- 启动加载是独立 `tokio::spawn`，不阻塞 `init`；加载完成后按 `size` 清理（`mod.rs:529-554`）。
-- 两个后台任务通过 `task_center::spawn_fixed` 托管，名为 `cache:<tag>:dump` / `cache:<tag>:cleanup`（`mod.rs:556-619`）。
-- `init` 中途失败会回滚：注销指标源、停掉已启动的 dump 任务（`mod.rs:1384-1416`）。
-- `destroy` 停任务后**无条件**做一次最终 dump，不受“变更数 ≥1024”限制（`mod.rs:1424-1450`）。
+- 缓存 map 在 `init` 中创建并写入 `OnceCell`，因为 API 注册需要同一个 `CacheMap` 句柄（`mod.rs:1387-1400`）。
+- 启动加载是独立 `tokio::spawn`，不阻塞 `init`；加载完成后按 `size` 清理（`mod.rs:555-580`）。
+- 两个后台任务通过 `task_center::spawn_fixed` 托管，名为 `cache:<tag>:dump` / `cache:<tag>:cleanup`（`mod.rs:582-645`）。
+- `init` 中途失败会回滚：注销指标源、停掉已启动的 dump 任务（`mod.rs:1410-1442`）。
+- `destroy` 停任务后**无条件**做一次最终 dump，不受“变更数 ≥1024”限制（`mod.rs:1450-1476`）。
 - staged reload 时新旧实例各自持有独立 map；插件 API 路由进入候选 hub，dump 临时文件名带 pid + 序号避免交错。
 
 ## 4. 请求主路径
@@ -120,7 +120,7 @@ sequenceDiagram
     Q-->>C: 最终响应
 ```
 
-`cache_map` 尚未初始化时直接 `continue_next!`（`mod.rs:1470-1472`）。没有 Question 的请求无法构建键，同样直接放行。
+`cache_map` 尚未初始化时直接 `continue_next!`（`mod.rs:1496-1498`）。没有 Question 的请求无法构建键，同样直接放行。
 
 ### 4.2 主判定流程
 
@@ -156,7 +156,9 @@ flowchart TD
     N -- 否 --> P["成为 leader<br/>持有 guard 到函数结束"]
     O --> O1{"重新 lookup 命中?"}
     O1 -- 是 --> L
-    O1 -- 否 --> Q["自行取数"]
+    O1 -- 否 --> O2{"仍有选举轮次?"}
+    O2 -- 是 --> N
+    O2 -- 否 --> Q["自行取数"]
     P --> Q
     Q --> R["执行下游 next"]
     R --> S{"响应存在、未截断<br/>且 ECS 作用域匹配?"}
@@ -170,7 +172,7 @@ flowchart TD
 
 两个容易忽略的分支：
 
-1. **命中但未开启短路**：`cache` 已经把响应写进 context，仍会执行下游；下游若产生新响应，`cache` **不会**回写（`mod.rs:1535-1539`）。这避免每次命中都刷新 TTL 造成“永不过期”，但下游行为可能覆盖缓存结果。
+1. **命中但未开启短路**：`cache` 已经把响应写进 context，仍会执行下游；下游若产生新响应，`cache` **不会**回写（`mod.rs:1579-1583`）。这避免每次命中都刷新 TTL 造成“永不过期”，但下游行为可能覆盖缓存结果。
 2. **单飞只覆盖 miss/expired**：stale 命中走的是另一套“后台刷新去重”，不进入 single-flight map。
 
 ### 4.3 缓存键
@@ -195,8 +197,8 @@ ECS 摘要（`key.rs:74-99`）：
 
 ### 4.4 命中与 TTL 重写
 
-- fresh：`remaining_ttl = (fresh_until_ms - now) / 1000`（向下取整），通过 `clone_with_id_and_record_ttl()` 复制响应，改写 answer/authority/additional 的 TTL，替换为当前请求 ID；EDNS 保留，RRSIG 等 `signature` 区不重写 TTL（`mod.rs:887-890`、`crates/proto/src/message.rs`）。
-- stale：返回 TTL 为 `min(lazy_cache_ttl, item.ttl)`（`mod.rs:893-898`）。
+- fresh：`remaining_ttl = (fresh_until_ms - now) / 1000`（向下取整），通过 `clone_with_id_and_record_ttl()` 复制响应，改写 answer/authority/additional 的 TTL，替换为当前请求 ID；EDNS 保留，RRSIG 等 `signature` 区不重写 TTL（`mod.rs:913-916`、`crates/proto/src/message.rs`）。
+- stale：返回 TTL 为 `min(lazy_cache_ttl, item.ttl)`（`mod.rs:919-924`）。
 - 两种命中都会 `context.set_response(...)`，是否继续链由 `short_circuit` 决定。
 - 命中路径**不更新** `cache_time_ms` / `expire_at_ms`，只可能按 touch 间隔更新 `last_access_ms`。
 
@@ -223,22 +225,24 @@ sequenceDiagram
     B->>K: 重新 lookup
     alt 命中
         B-->>B: 走命中路径
-    else 仍未命中
+    else 仍未命中且仍有选举轮次
+        B->>M: 重新注册 → 其中一个 waiter 成为新 leader
+    else 轮次耗尽
         B->>U: 自行取数（不再注册 leader）
     end
 ```
 
 实现细节：
 
-- leader 的 guard 一直持有到 `execute_with_next` 返回，确保唤醒发生在写入完成之后（`mod.rs:1476-1511`）。
-- follower 先 `enable()` 再复查 map，专门处理“注册前 leader 已离开”的竞态（`mod.rs:1492-1501`）。
-- 等待上限 `MISS_SINGLE_FLIGHT_WAIT = 5s`；超时或 leader 失败后 follower 自己取数。
-- leader 的 `Drop` 无论成功、失败还是取消都会清理并唤醒（`mod.rs:517-526`）。
+- leader 的 guard 一直持有到 `execute_with_next` 返回，确保唤醒发生在写入完成之后（`mod.rs:1502-1556`）。
+- follower 先 `enable()` 再复查 map，专门处理“注册前 leader 已离开”的竞态（`mod.rs:1526-1537`）。
+- 等待上限由 `single_flight_wait_ms`（默认 5000ms）控制，所有轮次共享该预算；leader 失败后又未写入缓存时，waiter 会重新注册参与选举，最多 `single_flight_max_rounds`（默认 3）轮，让其中一个接任 leader，其余继续等待，避免所有 waiter 同时打向下游；轮次耗尽后才自行取数。
+- leader 的 `Drop` 无论成功、失败还是取消都会清理并唤醒（`mod.rs:543-552`）。
 - 代价：每次 miss 需要一次 `Mutex<AHashMap>` 短临界区；命中路径不触碰该锁。
 
 ### 4.6 ECS 防护（写入前）
 
-键在进入 `cache` 时就算好，而下游 `ecs_handler` 可能再次注入 ECS，因此写入前必须复核（`mod.rs:1589-1594`）：
+键在进入 `cache` 时就算好，而下游 `ecs_handler` 可能再次注入 ECS，因此写入前必须复核（`mod.rs:1633-1638`）：
 
 ```text
 extract_any_ecs_scope(当前请求) == key.ecs_scope
@@ -276,9 +280,9 @@ sequenceDiagram
 
 细节：
 
-- 只有存在 `next` 时才刷新；没有下游句柄时直接放弃（`mod.rs:1224-1226`）。
+- 只有存在 `next` 时才刷新；没有下游句柄时直接放弃（`mod.rs:1250-1252`）。
 - 子查询用 `context.copy_for_subquery()` 并清空响应，避免污染当前请求的 marks/response。
-- 刷新失败（超时、错误、无响应、截断、ECS 不匹配、TTL 策略 Skip）都会计入 `cache_lazy_refresh_total{result="failed"}`；`low_positive_ttl` 还会在“条目未被替换”的前提下删除 stale 条目（`mod.rs:1300-1320`）。
+- 刷新失败（超时、错误、无响应、截断、ECS 不匹配、TTL 策略 Skip）都会计入 `cache_lazy_refresh_total{result="failed"}`；`low_positive_ttl` 还会在“条目未被替换”的前提下删除 stale 条目（`mod.rs:1326-1346`）。
 - `short_circuit: false` 时前台链会继续执行，后台刷新也在跑，**可能出现重复上游查询**；这是“命中不短路 + stale 刷新”的固有成本。
 
 ## 5. 时间语义
@@ -338,9 +342,9 @@ flowchart TD
 | 写入后淘汰上限 | 512 | 控制热路径尾延迟 |
 | 超大缓存批量上限 | 65536 | `size > 100k` 时限制单次淘汰量 |
 
-采样 LRU 通过 `scan_cursor` 轮转起点，避免总是扫描 DashMap 前几个分片；排序后只淘汰最旧的一部分，因此是“近似”而非严格 LRU（`mod.rs:721-750`、`ttl.rs:262-292`）。
+采样 LRU 通过 `scan_cursor` 轮转起点，避免总是扫描 DashMap 前几个分片；排序后只淘汰最旧的一部分，因此是“近似”而非严格 LRU（`mod.rs:747-776`、`ttl.rs:262-292`）。
 
-命中侧 touch 是自适应的（`mod.rs:626-683`）：
+命中侧 touch 是自适应的（`mod.rs:652-709`）：
 
 | 占用率 | touch 间隔 | 效果 |
 |---|---|---|
@@ -433,7 +437,7 @@ flowchart TD
 | `cache_insert_total` | counter | `plugin_tag` | 写入/更新次数 |
 | `cache_skip_total` | counter | `plugin_tag`、`reason` | 写入被拒：`truncated` / `no_ttl` / `incomplete_answer` / `low_positive_ttl` / `ecs_scope_mismatch` |
 | `cache_lazy_refresh_total` | counter | `plugin_tag`、`result=started\|success\|failed` | 后台刷新结果 |
-| `cache_single_flight_wait_total` | counter | `plugin_tag` | 等待 leader 的 miss 次数 |
+| `cache_single_flight_wait_total` | counter | `plugin_tag` | 等待（含重新选举后再次等待）leader 的 miss 次数 |
 | `cache_entry_count` | gauge | `plugin_tag` | 当前条目数 |
 
 计数全部是进程内 `Relaxed` 原子；`cache_entry_count` 从 `OnceLock<CacheMap>` 读取，未初始化时为 0。
@@ -453,13 +457,16 @@ flowchart TD
 | `max_positive_ttl` | u32 秒 | 无 | 正响应 TTL 上限 |
 | `min_positive_ttl` | u32 秒 | 无 | 正响应进入缓存的最小 TTL（裁剪后判断） |
 | `ecs_in_key` | bool | false | ECS 是否进入键 |
+| `single_flight_wait_ms` | u64 毫秒 | 5000 | 冷/过期 miss 等待 leader 的预算（所有选举轮次共享） |
+| `single_flight_max_rounds` | usize | 3 | leader 失败后重新选举的最大轮次；1 表示关闭重新选举 |
 
-校验（`mod.rs:1779-1836`）：
+校验（`mod.rs:1825-1898`）：
 
 - `size > 0`；
 - 设置 `dump_file` 时 `dump_interval > 0`；
 - `lazy_cache_ttl`、`max_negative_ttl`、`max_positive_ttl`、`min_positive_ttl` 均不得为 0；
-- `min_positive_ttl ≤ max_positive_ttl`。
+- `min_positive_ttl ≤ max_positive_ttl`；
+- `single_flight_wait_ms`、`single_flight_max_rounds` 均不得为 0。
 
 quick setup 只支持短路开关：
 
@@ -469,7 +476,7 @@ quick setup 只支持短路开关：
 - exec: "cache short_circuit=false"
 ```
 
-其它 token 会直接报错（`mod.rs:1906-1947`）。
+其它 token 会直接报错（`mod.rs:1976-2017`）。
 
 ## 11. TTL 决策细节
 
@@ -528,7 +535,7 @@ flowchart TD
 
 ### 与注释/文档不一致之处
 
-- `CacheConfig.lazy_cache_ttl` 的注释写的是“replaces computed positive/negative TTL”（`mod.rs:97-100`），但实现只延长保留期，fresh TTL 不变（`mod.rs:906-911`、`1164-1188`）。插件参考文档的描述是准确的，注释应同步修正。
+- `CacheConfig.lazy_cache_ttl` 的注释写的是“replaces computed positive/negative TTL”（`mod.rs:104-107`），但实现只延长保留期，fresh TTL 不变（`mod.rs:932-937`、`1192-1216`）。插件参考文档的描述是准确的，注释应同步修正。
 - 插件参考文档的指标清单缺少 `cache_single_flight_wait_total` 与 `cache_skip_total{reason="ecs_scope_mismatch"}`，API 清单缺少 `DELETE /entries/{id}`。
 - `POST /load_dump` 的 400 分支实际不可达：`load_cache_from_bytes()` 对无法反序列化的输入返回 `Ok(0)`（`persistence.rs:227-230`），因此无效 dump 会得到 `200 { ok: true, loaded_entries: 0 }`，且不会清空现有缓存。
 - `CacheItem::new()`（未验证构造）在非测试构建中被标记 `allow(dead_code)`，仅用于测试/历史路径；线上条目全部是 `new_validated()`。
