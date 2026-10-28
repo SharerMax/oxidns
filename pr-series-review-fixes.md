@@ -6,7 +6,7 @@
 
 - `87cad1b2`(chore: satisfy rustfmt and clippy on windows nightly)横跨 api / upstream / upgrade 三个系列的文件(auth.rs 导入重排、dial.rs 死代码清理、h2/h3 BufMut、upgrade cfg 门控),**必须**在它依赖的提交之后 cherry-pick:api 系列的 `06b42ea1`、upstream 系列的 `4db4f6a0` 与 `d08d26e7`。建议放在这些系列中**最后合并的一个**里,或手工拆分。不携带它不影响 Linux CI(这些是 Windows nightly clippy 的 lint)。
 - 推荐合并顺序:五个评审系列(互相独立)→ semaphore-pools(需 `3f14471d` 上下文)→ staged-reload(体量最大,评审周期最长)。
-- 分支元数据提交共 4 个,不进入上游 PR:`150e615e`/`47d55ae6`(设计文档状态)与 `06f0e734`/`b6e7791e`(PR 系列拆分文档);设计文档本身(`design-*.md`)可随对应系列携带,也可不带。
+- 分支元数据提交共 5 个,不进入上游 PR:`150e615e`/`47d55ae6`(设计文档状态)、`06f0e734`/`b6e7791e`(PR 系列拆分文档)与 `433ee0a5`(PR 系列文档同步 single-flight 提交);设计文档本身(`design-*.md`)可随对应系列携带,也可不带。
 
 ---
 
@@ -50,7 +50,7 @@ PR 标题建议:`fix(cache): ECS scope validation, single-flight, and persistenc
 | 3 | `c3078f54` | dump 序列化移入 `spawn_blocking`;staging 文件名加 pid+序号(重载期新旧实例不交错)|
 | 4 | `62594797` | lazy 无 stale 窗口语义文档化(`lazy_cache_ttl < ttl` 时无 stale 窗口;未开 short_circuit 不回写)|
 | 5 | `4c4cb1dc` | 冷/过期 miss single-flight——leader/follower 去重,消除热门域名过期风暴;`enable()`+复查防唤醒丢失;`cache_single_flight_wait_total` 计数;2 项新测试 |
-| 6 | `9b2a182f` | single-flight leader 失败后有界重新选举(共享等待预算,轮次耗尽自行取数);`single_flight_wait_ms` / `single_flight_max_rounds` 配置化并校验非 0;`cache_single_flight_wait_total` 补齐指标文档、WebUI schema/本地化与字段说明 |
+| 6 | `659dcf15` | single-flight leader 失败后有界重新选举(共享等待预算,轮次耗尽自行取数);`single_flight_wait_ms` / `single_flight_max_rounds` 配置化并校验非 0;`cache_single_flight_wait_total` 补齐指标文档、WebUI schema/本地化与字段说明 |
 
 按表序;#5 依赖 #1 的同文件上下文;#6 依赖 #5 的同文件上下文。
 
@@ -97,4 +97,4 @@ PR 标题建议:`fix(service,upgrade): graceful SCM stop and upgrade hardening`
 | semaphore-pools | 5 | 中 | 见 `pr-series-semaphore-pools.md` |
 | staged-reload | 3 | 中 | 见 `pr-series-staged-reload.md`,建议最后合并 |
 
-分支总提交 40 = 五个修复系列 27 + 共享 lint 1 + semaphore 5 + staged-reload 3 + 分支元数据 4。
+分支总提交 41 = 五个修复系列 27 + 共享 lint 1 + semaphore 5 + staged-reload 3 + 分支元数据 5。
