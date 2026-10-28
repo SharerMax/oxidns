@@ -39,7 +39,7 @@ PR 标题建议:`fix(server): ingress validation, framing, and drain hardening`
 
 按表序 cherry-pick;#8 依赖 #3(同一校验语义的 task 前移)。
 
-## 系列 3:缓存正确性与性能(5 提交)
+## 系列 3:缓存正确性与性能(6 提交)
 
 PR 标题建议:`fix(cache): ECS scope validation, single-flight, and persistence hardening`
 
@@ -50,8 +50,9 @@ PR 标题建议:`fix(cache): ECS scope validation, single-flight, and persistenc
 | 3 | `c3078f54` | dump 序列化移入 `spawn_blocking`;staging 文件名加 pid+序号(重载期新旧实例不交错)|
 | 4 | `62594797` | lazy 无 stale 窗口语义文档化(`lazy_cache_ttl < ttl` 时无 stale 窗口;未开 short_circuit 不回写)|
 | 5 | `4c4cb1dc` | 冷/过期 miss single-flight——leader/follower 去重,消除热门域名过期风暴;`enable()`+复查防唤醒丢失;`cache_single_flight_wait_total` 计数;2 项新测试 |
+| 6 | `9b2a182f` | single-flight leader 失败后有界重新选举(共享等待预算,轮次耗尽自行取数);`single_flight_wait_ms` / `single_flight_max_rounds` 配置化并校验非 0;`cache_single_flight_wait_total` 补齐指标文档、WebUI schema/本地化与字段说明 |
 
-按表序;#5 依赖 #1 的同文件上下文。
+按表序;#5 依赖 #1 的同文件上下文;#6 依赖 #5 的同文件上下文。
 
 ## 系列 4:上游与协议健壮性(7 提交)
 
@@ -89,11 +90,11 @@ PR 标题建议:`fix(service,upgrade): graceful SCM stop and upgrade hardening`
 |---|---|---|---|
 | 1 API 加固 | 3 | 低 | 可立即发 PR |
 | 2 DNS 服务加固 | 8 | 低 | 可立即发 PR |
-| 3 缓存正确性与性能 | 5 | 低(P0 修复建议优先评审)| 可立即发 PR,建议标注 P0 |
+| 3 缓存正确性与性能 | 6 | 低(P0 修复建议优先评审)| 可立即发 PR,建议标注 P0 |
 | 4 上游与协议健壮性 | 7 | 低(#1/#2 触及建连热路径)| 可立即发 PR |
 | 5 平台与升级 | 3 | 中(Windows 生命周期行为)| 建议 Windows 环境实测后发 |
 | 共享 lint | `87cad1b2` | 无 | 随最后合并的系列携带 |
 | semaphore-pools | 5 | 中 | 见 `pr-series-semaphore-pools.md` |
 | staged-reload | 3 | 中 | 见 `pr-series-staged-reload.md`,建议最后合并 |
 
-分支总提交 39 = 五个修复系列 26 + 共享 lint 1 + semaphore 5 + staged-reload 3 + 分支元数据 4。
+分支总提交 40 = 五个修复系列 27 + 共享 lint 1 + semaphore 5 + staged-reload 3 + 分支元数据 4。
