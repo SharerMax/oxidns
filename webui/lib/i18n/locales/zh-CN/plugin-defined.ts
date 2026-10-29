@@ -33,6 +33,11 @@ export const zhCNPluginDefined = {
           description: "指定 UDP 监听地址。",
           example: "0.0.0.0:53",
         },
+        disable_ecs: {
+          label: "禁用 ECS",
+          description:
+            "开启后移除请求中的 EDNS Client Subnet，并移除响应中回显的 ECS。",
+        },
       },
       metrics: {
         labels: {
@@ -86,6 +91,11 @@ export const zhCNPluginDefined = {
         idle_timeout: {
           label: "空闲超时(秒)",
           description: "指定连接空闲超时设置。",
+        },
+        disable_ecs: {
+          label: "禁用 ECS",
+          description:
+            "开启后移除请求中的 EDNS Client Subnet，并移除响应中回显的 ECS。",
         },
       },
       metrics: {
@@ -169,6 +179,11 @@ export const zhCNPluginDefined = {
           label: "启用 HTTP/3",
           description: "指定是否同时启用 HTTP/3。",
         },
+        disable_ecs: {
+          label: "禁用 ECS",
+          description:
+            "开启后移除请求中的 EDNS Client Subnet，并移除响应中回显的 ECS（对所有路径生效）。",
+        },
       },
       metrics: {
         labels: {
@@ -222,6 +237,11 @@ export const zhCNPluginDefined = {
         idle_timeout: {
           label: "空闲超时(秒)",
           description: "指定 QUIC transport 的空闲超时。",
+        },
+        disable_ecs: {
+          label: "禁用 ECS",
+          description:
+            "开启后移除请求中的 EDNS Client Subnet，并移除响应中回显的 ECS。",
         },
       },
       metrics: {
@@ -494,7 +514,8 @@ export const zhCNPluginDefined = {
         },
         single_flight_max_rounds: {
           label: "单飞选举轮次上限",
-          description: "leader 失败后重新选举的次数上限，设为 1 可关闭重新选举。",
+          description:
+            "leader 失败后重新选举的次数上限，设为 1 可关闭重新选举。",
         },
       },
       quickSetup: {

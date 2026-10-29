@@ -62,6 +62,15 @@ export const serverPluginDefinitions: PluginKindDefinition[] = [
         example: "0.0.0.0:53",
         required: true,
       },
+      {
+        key: "disable_ecs",
+        description:
+          "开启后移除请求中的 EDNS Client Subnet，并移除响应中回显的 ECS。",
+        label: "禁用 ECS",
+        type: "switch",
+        default: false,
+        advanced: true,
+      },
     ],
   },
   {
@@ -107,6 +116,15 @@ export const serverPluginDefinitions: PluginKindDefinition[] = [
         label: "空闲超时(秒)",
         type: "number",
         default: 10,
+        advanced: true,
+      },
+      {
+        key: "disable_ecs",
+        description:
+          "开启后移除请求中的 EDNS Client Subnet，并移除响应中回显的 ECS。",
+        label: "禁用 ECS",
+        type: "switch",
+        default: false,
         advanced: true,
       },
     ],
@@ -206,6 +224,15 @@ export const serverPluginDefinitions: PluginKindDefinition[] = [
         default: false,
         advanced: true,
       },
+      {
+        key: "disable_ecs",
+        description:
+          "开启后移除请求中的 EDNS Client Subnet，并移除响应中回显的 ECS（对所有路径生效）。",
+        label: "禁用 ECS",
+        type: "switch",
+        default: false,
+        advanced: true,
+      },
     ],
   },
   {
@@ -252,6 +279,15 @@ export const serverPluginDefinitions: PluginKindDefinition[] = [
         description: "指定 QUIC transport 的空闲超时。",
         label: "空闲超时(秒)",
         type: "number",
+        advanced: true,
+      },
+      {
+        key: "disable_ecs",
+        description:
+          "开启后移除请求中的 EDNS Client Subnet，并移除响应中回显的 ECS。",
+        label: "禁用 ECS",
+        type: "switch",
+        default: false,
         advanced: true,
       },
     ],

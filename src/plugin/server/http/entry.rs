@@ -589,6 +589,7 @@ mod tests {
             Arc::new(RequestHandle {
                 entry_executor: executor,
                 metrics: None,
+                disable_ecs: false,
             }),
             observed,
         )

@@ -7,6 +7,8 @@ export const enUSDocs = {
       "- Type: `string`; Required: Yes; Default: None\n- Function: Specify the entry executor that handles all requests of the listener, usually the sequence plug-in.\n- Configuration requirements:\n  - Must reference a defined executor plugin.\n  - A common value is a `tag` of a certain `sequence`.\n- Operational impact:\n  - All requests entering the current `udp_server` will be handed over to this executor for continued processing.\n  - If the reference does not exist or is of the wrong type, plugin initialization will fail.",
     listen:
       "- Type: `string`; Required: Yes; Default: None\n- Function: Specify the UDP listening address.\n- Supported formats:\n  - `ip:port`\n  - `:port`\n- Operational impact:\n  - Determine the address and port to which the listener is bound.\n  - The listener cannot be started when the address is invalid, the port conflicts, or the binding fails.",
+    disable_ecs:
+      "- Type: `boolean`; Required: No; Default: `false`\n- Function: When enabled, removes the EDNS Client Subnet (ECS) option from the request and strips any ECS echoed in the response.\n- Operational impact:\n  - Downstream executors (including `ecs_handler` and `client_ip_from_ecs`) no longer see the client subnet.\n  - Responses no longer carry ECS, so the subnet used upstream is not leaked to the client.",
   },
   tcp_server: {
     entry:
@@ -17,6 +19,8 @@ export const enUSDocs = {
     key: "- Type: `string`; Required: No; Default: None\n- Function: Specify the TLS private key file path.\n- Conditions of use:\n  - Enable TLS when used with `cert`.\n- Operational impact:\n  - When missing or invalid, TLS mode cannot be established.",
     idle_timeout:
       "- Type: `integer`; required: no; default value: `10`\n- Unit: seconds\n- Function: Specify the connection idle timeout setting.\n- Operational impact:\n  - Affects long connection keep-alive and idle connection life cycles.\n  - The larger the value, the longer the idle connection is retained.",
+    disable_ecs:
+      "- Type: `boolean`; Required: No; Default: `false`\n- Function: When enabled, removes the EDNS Client Subnet (ECS) option from the request and strips any ECS echoed in the response.\n- Operational impact:\n  - Downstream executors (including `ecs_handler` and `client_ip_from_ecs`) no longer see the client subnet.\n  - Responses no longer carry ECS, so the subnet used upstream is not leaked to the client.",
   },
   http_server: {
     entries:
@@ -31,6 +35,8 @@ export const enUSDocs = {
       "- Type: `integer`; required: no; default value: `30`\n- Unit: seconds\n- Function: Specify HTTP connection idle timeout.\n- Operational impact:\n  - Affects HTTP/2 long connection life cycle.",
     enable_http3:
       '- Type: `boolean`; required: no; default value: `false`\n- Function: Specify whether to enable HTTP/3 at the same time.\n- Conditions of use:\n  - `cert` and `key` need to be configured at the same time.\n- Operational impact:\n  - When enabled, an additional QUIC-based DoH listening task will be launched.\n  - HTTP/2 response will return `Alt-Svc: h3=":<listen-port>"; ma=86400`, prompting the client to upgrade to HTTP/3 on the same port.',
+    disable_ecs:
+      "- Type: `boolean`; Required: No; Default: `false`\n- Function: Applies to every route. When enabled, removes the EDNS Client Subnet (ECS) option from the request and strips any ECS echoed in the response.\n- Operational impact:\n  - Downstream executors (including `ecs_handler` and `client_ip_from_ecs`) no longer see the client subnet.\n  - Responses no longer carry ECS, so the subnet used upstream is not leaked to the client.",
   },
   quic_server: {
     entry:
@@ -41,6 +47,8 @@ export const enUSDocs = {
     key: "- Type: `string`; Required: Yes; Default: None\n- Function: Specify the TLS private key file required by DoQ.\n- Operational impact:\n  - The listener cannot be started when the private key is invalid.",
     idle_timeout:
       "- Type: `integer`; required: no; default value: none\n- Unit: seconds\n- Function: Specify the idle timeout of QUIC transport.\n- Operational impact:\n  - Affects the recycling timing of idle QUIC connections.",
+    disable_ecs:
+      "- Type: `boolean`; Required: No; Default: `false`\n- Function: When enabled, removes the EDNS Client Subnet (ECS) option from the request and strips any ECS echoed in the response.\n- Operational impact:\n  - Downstream executors (including `ecs_handler` and `client_ip_from_ecs`) no longer see the client subnet.\n  - Responses no longer carry ECS, so the subnet used upstream is not leaked to the client.",
   },
   sequence: {
     args: "- Type: `array`; Required: Yes; Default: None\n- Function: Define the rule chain of sequence.\n- Operational impact:\n  - Rules are executed in the order they are written.\n  - Plugin initialization fails when `args` is empty.",

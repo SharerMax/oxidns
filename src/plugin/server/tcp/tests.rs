@@ -139,6 +139,7 @@ async fn wait_for(semaphore: &Semaphore) {
 
 #[tokio::test]
 async fn connection_exit_preserves_accepted_requests_and_releases_writer() {
+    crate::infra::clock::AppClock::start();
     // Exercise both peer EOF and cancellation by the server shutdown select.
     for cancel in [false, true] {
         let (mut client, stream) = tokio::io::duplex(1024);
@@ -147,6 +148,7 @@ async fn connection_exit_preserves_accepted_requests_and_releases_writer() {
         let handler = Arc::new(RequestHandle {
             entry_executor: executor.clone(),
             metrics: Some(metrics.clone()),
+            disable_ecs: false,
         });
         let requests = TaskTracker::new();
         let tracked = requests.clone();
@@ -242,6 +244,7 @@ async fn write_failure_closes_connection_while_reader_is_pending() {
     let handler = Arc::new(RequestHandle {
         entry_executor: executor.clone(),
         metrics: None,
+        disable_ecs: false,
     });
     let requests = TaskTracker::new();
     let tracked = requests.clone();
@@ -303,6 +306,7 @@ async fn pipelined_requests_can_complete_out_of_order() {
     let handler = Arc::new(RequestHandle {
         entry_executor: executor.clone(),
         metrics: None,
+        disable_ecs: false,
     });
     let requests = TaskTracker::new();
     let tracked = requests.clone();
@@ -354,6 +358,7 @@ async fn cancellation_releases_a_writer_blocked_mid_frame() {
     let handler = Arc::new(RequestHandle {
         entry_executor: executor.clone(),
         metrics: None,
+        disable_ecs: false,
     });
     let requests = TaskTracker::new();
     let tracked = requests.clone();

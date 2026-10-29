@@ -71,6 +71,12 @@ pub struct QuicServerConfig {
     /// - Applies to QUIC transport. When absent, quinn's default is used.
     #[serde(default, deserialize_with = "deserialize_duration_option")]
     idle_timeout: Option<Duration>,
+
+    /// Strip the EDNS Client Subnet option from the request before the
+    /// pipeline sees it and from the outbound response.
+    ///
+    /// Default: false.
+    disable_ecs: Option<bool>,
 }
 
 /// QUIC DNS server plugin
@@ -408,6 +414,7 @@ impl PluginFactory for QuicServerFactory {
                 request_handle: Arc::new(RequestHandle {
                     entry_executor,
                     metrics: Some(metrics.clone()),
+                    disable_ecs: quic_config.disable_ecs.unwrap_or(false),
                 }),
                 metrics,
                 shutdown_tx: watch::channel(false).0,

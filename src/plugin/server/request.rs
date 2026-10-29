@@ -13,7 +13,7 @@ use crate::core::context::DnsContext;
 pub use crate::core::context::RequestMeta;
 use crate::infra::network::ip::normalize_ipv4_mapped_socket_addr;
 use crate::plugin::executor::{ExecStep, Executor};
-use crate::proto::{Edns, Message, Rcode};
+use crate::proto::{Edns, EdnsCode, Message, Rcode};
 
 #[derive(Debug)]
 pub struct RequestHandle {
@@ -21,6 +21,9 @@ pub struct RequestHandle {
     /// Shared server metrics. `None` for internal/test handles that should not
     /// emit server-level metrics.
     pub(crate) metrics: Option<Arc<ServerMetrics>>,
+    /// Strip the EDNS Client Subnet option from the request before it enters
+    /// the pipeline and from the outbound response.
+    pub(crate) disable_ecs: bool,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -42,12 +45,13 @@ impl RequestHandle {
     #[hotpath::measure]
     pub async fn handle_request(
         &self,
-        msg: Message,
+        mut msg: Message,
         src_addr: SocketAddr,
         meta: RequestMeta,
     ) -> RequestResult {
         let metrics_start = self.metrics.as_ref().map(|m| m.on_request_start());
 
+        self.strip_request_ecs(&mut msg);
         let mut context = DnsContext::new(normalize_ipv4_mapped_socket_addr(src_addr), msg);
         self.apply_request_meta(&mut context, meta);
 
@@ -63,7 +67,7 @@ impl RequestHandle {
                 context.request.id()
             );
             let mut response = context.request.response(Rcode::Refused);
-            Self::finalize_response(&context.request, &mut response);
+            self.finalize_response(&context.request, &mut response);
             if let (Some(metrics), Some(start_ms)) = (self.metrics.as_ref(), metrics_start) {
                 metrics.on_request_finish(start_ms, RequestExit::Controlled);
             }
@@ -88,7 +92,7 @@ impl RequestHandle {
                 context.request.id()
             );
             let mut response = context.request.response(Rcode::BADVERS);
-            Self::finalize_response(&context.request, &mut response);
+            self.finalize_response(&context.request, &mut response);
             if let (Some(metrics), Some(start_ms)) = (self.metrics.as_ref(), metrics_start) {
                 metrics.on_request_finish(start_ms, RequestExit::Controlled);
             }
@@ -137,7 +141,7 @@ impl RequestHandle {
             }
         };
 
-        Self::finalize_response(&context.request, &mut response);
+        self.finalize_response(&context.request, &mut response);
 
         if event_enabled!(Level::DEBUG) {
             debug!(
@@ -185,8 +189,20 @@ impl RequestHandle {
         context.request().response(rcode)
     }
 
+    /// Remove the EDNS Client Subnet option from an inbound query so plugins
+    /// downstream never observe the client subnet.
+    #[inline]
+    fn strip_request_ecs(&self, request: &mut Message) {
+        if !self.disable_ecs {
+            return;
+        }
+        if let Some(edns) = request.edns_mut() {
+            edns.remove(EdnsCode::Subnet);
+        }
+    }
+
     /// Apply server-level RFC fixes to every outbound response.
-    fn finalize_response(request: &Message, response: &mut Message) {
+    fn finalize_response(&self, request: &Message, response: &mut Message) {
         response.set_recursion_available(true);
 
         if request.edns().is_some() && response.edns().is_none() {
@@ -195,6 +211,14 @@ impl RequestHandle {
                 edns.flags_mut().dnssec_ok = req_edns.flags().dnssec_ok;
             }
             response.set_edns(edns);
+        }
+
+        // A response must not echo a client subnet either, otherwise the
+        // client learns which subnet upstream resolution used.
+        if self.disable_ecs
+            && let Some(edns) = response.edns_mut()
+        {
+            edns.remove(EdnsCode::Subnet);
         }
     }
 }
@@ -209,7 +233,8 @@ mod tests {
     use crate::continue_next;
     use crate::infra::error::Result;
     use crate::plugin::Plugin;
-    use crate::proto::{Name, Question, RecordType};
+    use crate::proto::{ClientSubnet, EdnsOption, Name, Question, RecordType};
+    use std::net::{IpAddr, Ipv4Addr};
 
     fn make_request(id: u16, qname: &str) -> Message {
         let mut request = Message::new();
@@ -222,10 +247,30 @@ mod tests {
         request
     }
 
+    fn make_ecs_request(id: u16, qname: &str) -> Message {
+        let mut request = make_request(id, qname);
+        let mut edns = Edns::new();
+        edns.insert(EdnsOption::Subnet(ClientSubnet::new(
+            IpAddr::V4(Ipv4Addr::new(192, 0, 2, 42)),
+            24,
+            0,
+        )));
+        request.set_edns(edns);
+        request
+    }
+
     fn make_request_handle(executor: Arc<dyn Executor>) -> RequestHandle {
+        make_request_handle_with_disable_ecs(executor, false)
+    }
+
+    fn make_request_handle_with_disable_ecs(
+        executor: Arc<dyn Executor>,
+        disable_ecs: bool,
+    ) -> RequestHandle {
         RequestHandle {
             entry_executor: executor,
             metrics: None,
+            disable_ecs,
         }
     }
 
@@ -423,5 +468,125 @@ mod tests {
 
         assert_eq!(result.response.rcode(), Rcode::NXDomain);
         assert_eq!(result.exit, RequestExit::Completed);
+    }
+
+    #[derive(Debug)]
+    struct EcsEchoExecutor {
+        seen_ecs: Arc<Mutex<bool>>,
+    }
+
+    #[async_trait]
+    impl Plugin for EcsEchoExecutor {
+        fn tag(&self) -> &str {
+            "ecs_echo"
+        }
+
+        async fn init(&mut self, _context: &crate::plugin::PluginInitContext<'_>) -> Result<()> {
+            Ok(())
+        }
+
+        async fn destroy(&self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[async_trait]
+    impl Executor for EcsEchoExecutor {
+        async fn execute(&self, context: &mut DnsContext) -> Result<ExecStep> {
+            let seen_ecs = context
+                .request
+                .edns()
+                .as_ref()
+                .is_some_and(|edns| edns.option(EdnsCode::Subnet).is_some());
+            *self
+                .seen_ecs
+                .lock()
+                .expect("ecs capture lock should not be poisoned") = seen_ecs;
+
+            // Model an upstream that answers with the ECS scope it used.
+            let mut response = context.request.response(Rcode::NoError);
+            let mut edns = Edns::new();
+            edns.insert(EdnsOption::Subnet(ClientSubnet::new(
+                IpAddr::V4(Ipv4Addr::new(192, 0, 2, 0)),
+                24,
+                24,
+            )));
+            response.set_edns(edns);
+            context.set_response(response);
+            Ok(ExecStep::Return)
+        }
+    }
+
+    #[tokio::test]
+    async fn test_handle_request_strips_ecs_when_disabled() {
+        let seen_ecs = Arc::new(Mutex::new(false));
+        let request_handle = make_request_handle_with_disable_ecs(
+            Arc::new(EcsEchoExecutor {
+                seen_ecs: seen_ecs.clone(),
+            }),
+            true,
+        );
+
+        let result = request_handle
+            .handle_request(
+                make_ecs_request(31, "example.com."),
+                SocketAddr::from(([127, 0, 0, 1], 5303)),
+                RequestMeta::default(),
+            )
+            .await;
+
+        assert!(
+            !*seen_ecs
+                .lock()
+                .expect("ecs capture lock should not be poisoned"),
+            "pipeline must not see the client subnet when disable_ecs is enabled"
+        );
+        assert_eq!(
+            result
+                .request
+                .edns()
+                .as_ref()
+                .and_then(|edns| edns.option(EdnsCode::Subnet)),
+            None,
+            "request handed to the pipeline must not carry a subnet"
+        );
+        let response_edns = result.response.edns().as_ref().expect("OPT is preserved");
+        assert_eq!(
+            response_edns.option(EdnsCode::Subnet),
+            None,
+            "response must not echo a subnet when disable_ecs is enabled"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handle_request_keeps_ecs_by_default() {
+        let seen_ecs = Arc::new(Mutex::new(false));
+        let request_handle = make_request_handle(Arc::new(EcsEchoExecutor {
+            seen_ecs: seen_ecs.clone(),
+        }));
+
+        let result = request_handle
+            .handle_request(
+                make_ecs_request(32, "example.com."),
+                SocketAddr::from(([127, 0, 0, 1], 5303)),
+                RequestMeta::default(),
+            )
+            .await;
+
+        assert!(
+            *seen_ecs
+                .lock()
+                .expect("ecs capture lock should not be poisoned"),
+            "the pipeline must keep the client subnet by default"
+        );
+        assert!(
+            result
+                .request
+                .edns()
+                .as_ref()
+                .and_then(|edns| edns.option(EdnsCode::Subnet))
+                .is_some(),
+            "the default configuration must not strip the request subnet"
+        );
     }
 }

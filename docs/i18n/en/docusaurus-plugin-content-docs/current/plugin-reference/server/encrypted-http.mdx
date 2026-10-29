@@ -127,6 +127,15 @@ Provides DNS over HTTPS and can serve HTTP/1.1, HTTP/2, and optional HTTP/3.
   - Starts an additional QUIC-based DoH listener task.
   - HTTP/1.1 / HTTP/2 responses include `Alt-Svc: h3=":<listen-port>"; ma=86400` so clients can discover HTTP/3 on the same port.
 
+#### `disable_ecs`
+
+- Type: `boolean`; Required: no; Default: `false`
+- Purpose: Applies to every route. Removes the EDNS Client Subnet (ECS) option from the request and strips any ECS echoed in the response.
+- Example: `disable_ecs: true`
+- Runtime impact:
+  - Requests reach the executor chain without ECS, so `ecs_handler`, `client_ip_from_ecs`, and other ECS-aware executors no longer see the client subnet.
+  - Responses no longer echo ECS, so the subnet used upstream is not leaked to the client.
+
 ### Behavior
 
 - Each `path` can route to a different `exec`, which is useful for multi-entry policies.
@@ -218,6 +227,15 @@ Provides DNS over QUIC.
 - Example: `idle_timeout: 30`
 - Runtime impact:
   - Affects when idle QUIC connections are reclaimed.
+
+#### `disable_ecs`
+
+- Type: `boolean`; Required: no; Default: `false`
+- Purpose: Removes the EDNS Client Subnet (ECS) option from the request and strips any ECS echoed in the response.
+- Example: `disable_ecs: true`
+- Runtime impact:
+  - Requests reach the executor chain without ECS, so `ecs_handler`, `client_ip_from_ecs`, and other ECS-aware executors no longer see the client subnet.
+  - Responses no longer echo ECS, so the subnet used upstream is not leaked to the client.
 
 ### Behavior
 

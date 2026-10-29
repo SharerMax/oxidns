@@ -7,9 +7,15 @@ import {
 } from "@/lib/plugin-definitions";
 
 const EXPECTED_ADVANCED_FIELDS: Record<string, string[]> = {
-  "server/tcp_server": ["idle_timeout"],
-  "server/http_server": ["entries[].json_api", "idle_timeout", "enable_http3"],
-  "server/quic_server": ["idle_timeout"],
+  "server/udp_server": ["disable_ecs"],
+  "server/tcp_server": ["idle_timeout", "disable_ecs"],
+  "server/http_server": [
+    "entries[].json_api",
+    "idle_timeout",
+    "enable_http3",
+    "disable_ecs",
+  ],
+  "server/quic_server": ["idle_timeout", "disable_ecs"],
   "executor/forward": [
     "concurrent",
     "response_selection",

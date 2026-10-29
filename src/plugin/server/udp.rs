@@ -49,6 +49,12 @@ pub struct UdpServerConfig {
     /// - Must be a valid listen address or validation will fail.
     /// - Ensure the port is not occupied by other UDP listeners.
     listen: String,
+
+    /// Strip the EDNS Client Subnet option from the request before the
+    /// pipeline sees it and from the outbound response.
+    ///
+    /// Default: false.
+    disable_ecs: Option<bool>,
 }
 
 /// UDP DNS server plugin
@@ -345,6 +351,7 @@ impl PluginFactory for UdpServerFactory {
                 request_handle: Arc::new(RequestHandle {
                     entry_executor,
                     metrics: Some(metrics.clone()),
+                    disable_ecs: udp_config.disable_ecs.unwrap_or(false),
                 }),
                 metrics,
                 shutdown_tx: watch::channel(false).0,
@@ -450,6 +457,7 @@ mod tests {
             request_handle: Arc::new(RequestHandle {
                 entry_executor: executor.into(),
                 metrics: None,
+                disable_ecs: false,
             }),
             metrics: Arc::new(ServerMetrics::new(tag.clone(), "udp")),
             shutdown_tx: watch::channel(false).0,
