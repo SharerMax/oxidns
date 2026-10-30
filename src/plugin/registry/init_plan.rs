@@ -134,7 +134,6 @@ pub(super) fn build_create_contexts(
                 tag,
                 PluginCreateContext {
                     dependents,
-                    candidate: false,
                 },
             )
         })

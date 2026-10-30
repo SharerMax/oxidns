@@ -34,5 +34,14 @@ pub mod udp;
 pub(crate) const DEFAULT_SERVER_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub trait Server: Plugin {
+    /// Spawn the listener loop.
+    ///
+    /// Server plugins now start their listeners inside [`Plugin::init`], which
+    /// binds the socket and waits for startup confirmation before `init`
+    /// returns. The registry never calls this method; it is kept only so the
+    /// existing transport implementations keep a documented entry point.
+    #[deprecated(
+        note = "server plugins start listeners in Plugin::init; this method has no caller"
+    )]
     fn run(&self);
 }
