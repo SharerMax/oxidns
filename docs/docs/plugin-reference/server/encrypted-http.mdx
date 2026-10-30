@@ -127,15 +127,6 @@ import Admonition from "@theme/Admonition";
   - 启用后会额外启动基于 QUIC 的 DoH 监听任务。
   - HTTP/1.1 / HTTP/2 响应会返回 `Alt-Svc: h3=":<listen-port>"; ma=86400`，提示客户端可升级到同端口 HTTP/3。
 
-#### `disable_ecs`
-
-- 类型：`boolean`；必填：否；默认值：`false`
-- 作用：对所有路径生效；开启后移除请求中的 EDNS Client Subnet（ECS）option，并移除响应中回显的 ECS。
-- 示例：`disable_ecs: true`
-- 运行影响：
-  - 请求进入执行链前不再携带 ECS，依赖 ECS 的 `ecs_handler`、`client_ip_from_ecs` 等执行器将看不到客户端子网。
-  - 响应不再回显 ECS，避免向客户端泄漏上游使用的子网。
-
 ### 行为说明
 
 - 每个 `path` 可以路由到不同 `exec`，适合做多入口策略。
@@ -227,15 +218,6 @@ import Admonition from "@theme/Admonition";
 - 示例：`idle_timeout: 30`
 - 运行影响：
   - 影响空闲 QUIC 连接的回收时机。
-
-#### `disable_ecs`
-
-- 类型：`boolean`；必填：否；默认值：`false`
-- 作用：开启后移除请求中的 EDNS Client Subnet（ECS）option，并移除响应中回显的 ECS。
-- 示例：`disable_ecs: true`
-- 运行影响：
-  - 请求进入执行链前不再携带 ECS，依赖 ECS 的 `ecs_handler`、`client_ip_from_ecs` 等执行器将看不到客户端子网。
-  - 响应不再回显 ECS，避免向客户端泄漏上游使用的子网。
 
 ### 行为说明
 

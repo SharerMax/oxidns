@@ -89,12 +89,6 @@ pub struct TcpServerConfig {
     /// - Applied as TCP keepalive interval for long-lived connections.
     #[serde(default, deserialize_with = "deserialize_duration_option")]
     idle_timeout: Option<Duration>,
-
-    /// Strip the EDNS Client Subnet option from the request before the
-    /// pipeline sees it and from the outbound response.
-    ///
-    /// Default: false.
-    disable_ecs: Option<bool>,
 }
 
 /// TCP DNS server plugin
@@ -519,7 +513,6 @@ impl PluginFactory for TcpServerFactory {
                 request_handle: Arc::new(RequestHandle {
                     entry_executor,
                     metrics: Some(metrics.clone()),
-                    disable_ecs: tcp_config.disable_ecs.unwrap_or(false),
                 }),
                 metrics,
                 #[cfg(feature = "server-dot")]

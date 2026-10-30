@@ -54,15 +54,6 @@ import Admonition from "@theme/Admonition";
   - `:port` 等价于双栈监听 `[::]:port`；如需 IPv4-only，请写 `0.0.0.0:port`。
   - 地址无效、端口冲突或绑定失败时，监听器无法启动。
 
-#### `disable_ecs`
-
-- 类型：`boolean`；必填：否；默认值：`false`
-- 作用：开启后移除请求中的 EDNS Client Subnet（ECS）option，并移除响应中回显的 ECS。
-- 示例：`disable_ecs: true`
-- 运行影响：
-  - 请求进入执行链前不再携带 ECS，依赖 ECS 的 `ecs_handler`、`client_ip_from_ecs` 等执行器将看不到客户端子网。
-  - 响应不再回显 ECS，避免向客户端泄漏上游使用的子网。
-
 ### 行为说明
 
 - 使用 UDP socket 接收请求。
@@ -179,15 +170,6 @@ import Admonition from "@theme/Admonition";
 - 运行影响：
   - 影响长连接保活与空闲连接生命周期。
   - 值越大，空闲连接保留时间越长。
-
-#### `disable_ecs`
-
-- 类型：`boolean`；必填：否；默认值：`false`
-- 作用：开启后移除请求中的 EDNS Client Subnet（ECS）option，并移除响应中回显的 ECS。
-- 示例：`disable_ecs: true`
-- 运行影响：
-  - 请求进入执行链前不再携带 ECS，依赖 ECS 的 `ecs_handler`、`client_ip_from_ecs` 等执行器将看不到客户端子网。
-  - 响应不再回显 ECS，避免向客户端泄漏上游使用的子网。
 
 ### 行为说明
 

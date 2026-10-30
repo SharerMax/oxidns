@@ -37,11 +37,6 @@ export const enUSPluginDefined = {
           description: "Specify the UDP listening address.",
           example: "0.0.0.0:53",
         },
-        disable_ecs: {
-          label: "Disable ECS",
-          description:
-            "When enabled, removes the EDNS Client Subnet from the request and strips any ECS echoed in the response.",
-        },
       },
       metrics: {
         labels: {
@@ -103,11 +98,6 @@ export const enUSPluginDefined = {
         idle_timeout: {
           label: "Idle timeout (seconds)",
           description: "Specify connection idle timeout settings.",
-        },
-        disable_ecs: {
-          label: "Disable ECS",
-          description:
-            "When enabled, removes the EDNS Client Subnet from the request and strips any ECS echoed in the response.",
         },
       },
       metrics: {
@@ -200,11 +190,6 @@ export const enUSPluginDefined = {
           label: "Enable HTTP/3",
           description: "Specifies whether HTTP/3 is also enabled.",
         },
-        disable_ecs: {
-          label: "Disable ECS",
-          description:
-            "When enabled, removes the EDNS Client Subnet from the request and strips any ECS echoed in the response, for every route.",
-        },
       },
       metrics: {
         labels: {
@@ -265,11 +250,6 @@ export const enUSPluginDefined = {
         idle_timeout: {
           label: "Idle timeout (seconds)",
           description: "Specifies the idle timeout for the QUIC transport.",
-        },
-        disable_ecs: {
-          label: "Disable ECS",
-          description:
-            "When enabled, removes the EDNS Client Subnet from the request and strips any ECS echoed in the response.",
         },
       },
       metrics: {

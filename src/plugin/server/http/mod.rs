@@ -99,12 +99,6 @@ pub struct HttpServerConfig {
     /// - Requires TLS to be configured (`cert` + `key`).
     /// - Reuses the same `listen` address via QUIC endpoint.
     enable_http3: Option<bool>,
-
-    /// Strip the EDNS Client Subnet option from the request before the
-    /// pipeline sees it and from the outbound response, for every route.
-    ///
-    /// Default: false.
-    disable_ecs: Option<bool>,
 }
 
 /// HTTP route entry configuration
@@ -420,7 +414,6 @@ impl PluginFactory for HttpServerFactory {
 
         // Register routes for each configured entry
         // Each entry maps a path to an executor that processes DNS queries
-        let disable_ecs = http_config.disable_ecs.unwrap_or(false);
         for (idx, entry) in http_config.entries.iter().enumerate() {
             let json_api = entry.json_api.unwrap_or(false);
             let field = format!("args.entries[{}].exec", idx);
@@ -431,7 +424,6 @@ impl PluginFactory for HttpServerFactory {
             let request_handle = Arc::new(RequestHandle {
                 entry_executor: executor,
                 metrics: Some(metrics.clone()),
-                disable_ecs,
             });
 
             // Register the HTTP DNS entry for this path.

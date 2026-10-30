@@ -4,8 +4,6 @@ export const zhCNDocs = {
       "- 类型：`string`；必填：是；默认值：无\n- 作用：指定处理该监听器全部请求的入口执行器，通常为sequence插件。\n- 配置要求：\n  - 必须引用已定义的执行器插件。\n  - 常见取值为某个 `sequence` 的 `tag`。\n- 运行影响：\n  - 所有进入当前 `udp_server` 的请求都会交由该执行器继续处理。\n  - 若引用不存在或类型错误，插件初始化将失败。",
     listen:
       "- 类型：`string`；必填：是；默认值：无\n- 作用：指定 UDP 监听地址。\n- 支持格式：\n  - `ip:port`\n  - `:port`\n- 运行影响：\n  - 决定监听器绑定的地址与端口。\n  - 地址无效、端口冲突或绑定失败时，监听器无法启动。",
-    disable_ecs:
-      "- 类型：`boolean`；必填：否；默认值：`false`\n- 作用：开启后移除请求中的 EDNS Client Subnet（ECS），并移除响应中回显的 ECS。\n- 运行影响：\n  - 下游执行器（包括依赖 ECS 的 `ecs_handler`、`client_ip_from_ecs`）将看不到客户端子网。\n  - 响应不再携带 ECS，避免向客户端泄漏上游使用的子网。",
   },
   tcp_server: {
     entry:
@@ -16,8 +14,6 @@ export const zhCNDocs = {
     key: "- 类型：`string`；必填：否；默认值：无\n- 作用：指定 TLS 私钥文件路径。\n- 使用条件：\n  - 与 `cert` 配合使用时启用 TLS。\n- 运行影响：\n  - 缺失或无效时，TLS 模式无法建立。",
     idle_timeout:
       "- 类型：`integer`；必填：否；默认值：`10`\n- 单位：秒\n- 作用：指定连接空闲超时设置。\n- 运行影响：\n  - 影响长连接保活与空闲连接生命周期。\n  - 值越大，空闲连接保留时间越长。",
-    disable_ecs:
-      "- 类型：`boolean`；必填：否；默认值：`false`\n- 作用：开启后移除请求中的 EDNS Client Subnet（ECS），并移除响应中回显的 ECS。\n- 运行影响：\n  - 下游执行器（包括依赖 ECS 的 `ecs_handler`、`client_ip_from_ecs`）将看不到客户端子网。\n  - 响应不再携带 ECS，避免向客户端泄漏上游使用的子网。",
   },
   http_server: {
     entries:
@@ -32,8 +28,6 @@ export const zhCNDocs = {
       "- 类型：`integer`；必填：否；默认值：`30`\n- 单位：秒\n- 作用：指定 HTTP 连接空闲超时。\n- 运行影响：\n  - 影响 HTTP/2 长连接生命周期。",
     enable_http3:
       '- 类型：`boolean`；必填：否；默认值：`false`\n- 作用：指定是否同时启用 HTTP/3。\n- 使用条件：\n  - 需要同时配置 `cert` 与 `key`。\n- 运行影响：\n  - 启用后会额外启动基于 QUIC 的 DoH 监听任务。\n  - HTTP/2 响应会返回 `Alt-Svc: h3=":<listen-port>"; ma=86400`，提示客户端可升级到同端口 HTTP/3。',
-    disable_ecs:
-      "- 类型：`boolean`；必填：否；默认值：`false`\n- 作用：对所有路径生效；开启后移除请求中的 EDNS Client Subnet（ECS），并移除响应中回显的 ECS。\n- 运行影响：\n  - 下游执行器（包括依赖 ECS 的 `ecs_handler`、`client_ip_from_ecs`）将看不到客户端子网。\n  - 响应不再携带 ECS，避免向客户端泄漏上游使用的子网。",
   },
   quic_server: {
     entry:
@@ -44,8 +38,6 @@ export const zhCNDocs = {
     key: "- 类型：`string`；必填：是；默认值：无\n- 作用：指定 DoQ 所需 TLS 私钥文件。\n- 运行影响：\n  - 私钥无效时监听器无法启动。",
     idle_timeout:
       "- 类型：`integer`；必填：否；默认值：无\n- 单位：秒\n- 作用：指定 QUIC transport 的空闲超时。\n- 运行影响：\n  - 影响空闲 QUIC 连接的回收时机。",
-    disable_ecs:
-      "- 类型：`boolean`；必填：否；默认值：`false`\n- 作用：开启后移除请求中的 EDNS Client Subnet（ECS），并移除响应中回显的 ECS。\n- 运行影响：\n  - 下游执行器（包括依赖 ECS 的 `ecs_handler`、`client_ip_from_ecs`）将看不到客户端子网。\n  - 响应不再携带 ECS，避免向客户端泄漏上游使用的子网。",
   },
   sequence: {
     args: "- 类型：`array`；必填：是；默认值：无\n- 作用：定义 sequence 的规则链。\n- 运行影响：\n  - 规则按书写顺序依次执行。\n  - `args` 为空时插件初始化失败。",
