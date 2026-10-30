@@ -423,8 +423,8 @@ async fn handle_reload_command(
         "Reloading configuration from management API"
     );
 
-    // Unix: staged reload (design-zero-downtime-reload.md PR-B) — build and
-    // initialize the candidate (binding its listeners for SO_REUSEPORT
+    // Unix: staged reload (pr-doc/design-zero-downtime-reload.md PR-B) — build
+    // and initialize the candidate (binding its listeners for SO_REUSEPORT
     // overlap) while the old generation keeps serving; a candidate failure
     // leaves the running assembly untouched. Other platforms fall back to
     // the stop-the-world flow: binding over the still-live listeners would

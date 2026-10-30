@@ -83,7 +83,8 @@ impl PluginRuntimeManager {
             // Retire the previous runtime before building the candidate:
             // plugin initialization consults process globals (outbound
             // profiles) that the candidate replaces. The staged-reload design
-            // will lift this coupling; see design-zero-downtime-reload.md.
+            // will lift this coupling; see
+            // pr-doc/design-zero-downtime-reload.md.
             manager.retire_previous_runtime().await;
             manager.install_outbound_profiles(&config)?;
             let candidate = manager

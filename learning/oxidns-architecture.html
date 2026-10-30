@@ -2580,13 +2580,13 @@ html&gt;body{padding:0}&lt;/style&gt;
     &lt;ul&gt;
       &lt;li&gt;&lt;span class=&quot;viz-badge&quot;&gt;缓议&lt;/span&gt; &lt;strong&gt;热路径分配削减&lt;/strong&gt;:评估结论——查询报文的 &lt;code&gt;Message&lt;/code&gt; clone 是 Arc 引用计数 + 单 Vec 分配(极廉价),改&quot;编码一次再 from_bytes&quot;会引入完整解析开销、大概率负优化;真正的收益需要把上游池/连接层 API 改成 wire-bytes 通路(跨层重构),应有基准数据支撑后再动;缓存命中侧预编码响应缓冲同理(需先压测确认拷贝是瓶颈)&lt;/li&gt;
       &lt;li&gt;&lt;span class=&quot;viz-badge&quot;&gt;已完成 4c4cb1dc&lt;/span&gt; &lt;strong&gt;冷 miss single-flight&lt;/strong&gt;:首个 miss 成为取数 leader,并发同 key miss 有界等待并在唤醒后命中 leader 的新条目(leader 失败则 waiter 重新选举接任 leader,轮次耗尽后自行回退取数);消除热门域名过期风暴,新增 &lt;code&gt;cache_single_flight_wait_total&lt;/code&gt; 计数&lt;/li&gt;
-      &lt;li&gt;&lt;span class=&quot;viz-badge&quot;&gt;已完成&lt;/span&gt; &lt;strong&gt;零停机重载&lt;/strong&gt;:按 &lt;code&gt;design-zero-downtime-reload.md&lt;/code&gt; 实现完毕(36b27388 staged 主链 + 指标分代 + Unix 双绑;b7c93320 状态机 phase;72637c47 build/install 拆分;cd9881f4 候选 hub 路由)——Unix 上重载零拒连、坏配置零回滚;详见「设计与实施」标签页&lt;/li&gt;
-      &lt;li&gt;&lt;span class=&quot;viz-badge&quot;&gt;已完成&lt;/span&gt; &lt;strong&gt;池化改造&lt;/strong&gt;:按 &lt;code&gt;design-semaphore-pool-refactor.md&lt;/code&gt; 实现完毕(ac055074 ReusePool、cd9f5cbc PipelinePool 迁移 Semaphore;3e3db421 churn 基准护栏)——两池零手写 notify,唤醒丢失按构造不可能;详见「设计与实施」标签页&lt;/li&gt;
+      &lt;li&gt;&lt;span class=&quot;viz-badge&quot;&gt;已完成&lt;/span&gt; &lt;strong&gt;零停机重载&lt;/strong&gt;:按 &lt;code&gt;pr-doc/design-zero-downtime-reload.md&lt;/code&gt; 实现完毕(36b27388 staged 主链 + 指标分代 + Unix 双绑;b7c93320 状态机 phase;72637c47 build/install 拆分;cd9881f4 候选 hub 路由)——Unix 上重载零拒连、坏配置零回滚;详见「设计与实施」标签页&lt;/li&gt;
+      &lt;li&gt;&lt;span class=&quot;viz-badge&quot;&gt;已完成&lt;/span&gt; &lt;strong&gt;池化改造&lt;/strong&gt;:按 &lt;code&gt;pr-doc/design-semaphore-pool-refactor.md&lt;/code&gt; 实现完毕(ac055074 ReusePool、cd9f5cbc PipelinePool 迁移 Semaphore;3e3db421 churn 基准护栏)——两池零手写 notify,唤醒丢失按构造不可能;详见「设计与实施」标签页&lt;/li&gt;
       &lt;li&gt;&lt;span class=&quot;viz-badge&quot;&gt;部分完成 f9055c07&lt;/span&gt; &lt;strong&gt;协议细节&lt;/strong&gt;:UDP 预检已前移到任务创建之前(垃圾包零任务成本);名压缩提前启用(减 TC 回退)、TCP &lt;code&gt;into_split&lt;/code&gt; 改所有权半柄、recvmmsg 批量收包三项未动&lt;/li&gt;
     &lt;/ul&gt;
 
     &lt;h2&gt;设计与实施(重构系列)&lt;/h2&gt;
-    &lt;p class=&quot;oa-sub&quot;&gt;评审修复与两个架构级优化已全部实施并推送分支 &lt;code&gt;fix/code-review-priorities&lt;/code&gt;(49 个提交:37 项代码与工程改动 + 12 项文档;1322 项既有测试全绿,新增用例定向验证后由 CI 复核全量)。全部提交按子系统拆为七个可独立评审的 PR 系列,拆分方案、cherry-pick 序列与 PR 描述要点见仓库根目录:&lt;code&gt;pr-series-review-fixes.md&lt;/code&gt;(五个修复系列)、&lt;code&gt;pr-series-staged-reload.md&lt;/code&gt;、&lt;code&gt;pr-series-semaphore-pools.md&lt;/code&gt;。&lt;/p&gt;
+    &lt;p class=&quot;oa-sub&quot;&gt;评审修复与两个架构级优化已全部实施并推送分支 &lt;code&gt;fix/code-review-priorities&lt;/code&gt;(49 个提交:37 项代码与工程改动 + 12 项文档;1322 项既有测试全绿,新增用例定向验证后由 CI 复核全量)。全部提交按子系统拆为七个可独立评审的 PR 系列,拆分方案、cherry-pick 序列与 PR 描述要点见 &lt;code&gt;pr-doc/&lt;/code&gt; 目录:&lt;code&gt;pr-series-review-fixes.md&lt;/code&gt;(五个修复系列)、&lt;code&gt;pr-series-staged-reload.md&lt;/code&gt;、&lt;code&gt;pr-series-semaphore-pools.md&lt;/code&gt;。&lt;/p&gt;
     &lt;div class=&quot;table-responsive&quot;&gt;
       &lt;table class=&quot;table table-sm&quot;&gt;
         &lt;thead&gt;&lt;tr&gt;&lt;th&gt;系列&lt;/th&gt;&lt;th&gt;提交&lt;/th&gt;&lt;th&gt;核心内容&lt;/th&gt;&lt;th&gt;风险&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;

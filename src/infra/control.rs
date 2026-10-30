@@ -204,8 +204,8 @@ pub struct ControlSnapshot {
 
 /// Fine-grained progress of an in-flight reload, exposed via
 /// `/api/reload/status`. Phases follow the staged-reload pipeline
-/// (design-zero-downtime-reload.md): validating/building happen while the
-/// old generation serves; swapping/draining briefly overlap; failed marks
+/// (pr-doc/design-zero-downtime-reload.md): validating/building happen while
+/// the old generation serves; swapping/draining briefly overlap; failed marks
 /// a terminal failure with the phase it reached.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

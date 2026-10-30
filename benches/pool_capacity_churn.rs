@@ -1,5 +1,5 @@
 //! Saturated churn benchmark for the semaphore-backed pool capacity gate
-//! (design-semaphore-pool-refactor.md S4).
+//! (pr-doc/design-semaphore-pool-refactor.md S4).
 //!
 //! Measures steady-state acquire/release throughput of `PoolCapacity` under
 //! oversubscription (16 concurrent tasks on a 4-permit gate), the pattern
