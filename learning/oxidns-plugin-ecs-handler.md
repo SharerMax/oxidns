@@ -1,7 +1,7 @@
 # OxiDNS `ecs_handler` 插件实现解析
 
-> 分析基线：`v1.6.1`，分支 `fix/code-review-priorities`（HEAD `9ed5f08f`）。
-> 代码位置：`src/plugin/executor/ecs_handler.rs`（434 行，含测试；实现约 238 行）。
+> 分析基线：`v1.6.1`，分支 `fix/code-review-priorities`（HEAD `e23a1870`）。
+> 代码位置：`src/plugin/executor/ecs_handler.rs`（540 行，含测试；实现约 243 行）。
 > 关联模块：ECS 载荷模型在 `crates/proto/src/rdata/basic.rs`（`ClientSubnet`），IPv4-mapped 归一化在 `src/infra/network/ip.rs`，cache 的 ECS 作用域联动在 `src/plugin/executor/cache/key.rs`。
 > 本文只描述当前代码实际行为；与文档/注释不一致之处集中在第 12 节。
 
@@ -26,27 +26,27 @@
 
 | 能力 | 实现位置 |
 |---|---|
-| 客户端 ECS 保留 / 剥离（`forward`） | `ecs_handler.rs:115-120` |
-| 无 ECS 时从源 IP 或 `preset` 合成（`send`/`preset`） | `ecs_handler.rs:121-138` |
-| 响应侧 ECS 剥离（防泄漏内部子网元数据） | `ecs_handler.rs:93-99`、`229-233` |
-| quick setup `ecs [ip[/mask]]` | `ecs_handler.rs:160-178` |
-| 非 IN class 请求跳过请求侧处理 | `ecs_handler.rs:106-112` |
+| 客户端 ECS 保留 / 剥离（`forward`） | `ecs_handler.rs:118-123` |
+| 无 ECS 时从源 IP 或 `preset` 合成（`send`/`preset`） | `ecs_handler.rs:124-141` |
+| post 阶段请求与响应两侧 ECS 剥离（防泄漏客户端/内部子网元数据） | `ecs_handler.rs:95-102`、`232-236` |
+| quick setup `ecs [ip[/mask]]` | `ecs_handler.rs:163-181` |
+| 非 IN class 请求跳过请求侧处理（post 两侧清理仍生效） | `ecs_handler.rs:109-115` |
 
 ## 2. 代码地图
 
 | 结构 | 关键点 |
 |---|---|
-| `EcsHandlerConfig` | serde 配置：`forward`/`send`（默认 `false`）、`preset: Option<String>`、`mask4`/`mask6: Option<u8>`（`ecs_handler.rs:33-47`） |
-| `EcsHandler` | 运行时结构：全部字段在 `create` 期固化，**无内部状态、无依赖、无后台任务**（`ecs_handler.rs:49-57`） |
-| `EcsHandlerFactory` | `#[plugin_factory("ecs_handler")]`：`create` 走 YAML 配置，`quick_setup` 走 `ecs [ip[/mask]]` 参数（`ecs_handler.rs:145-179`） |
+| `EcsHandlerConfig` | serde 配置：`forward`/`send`（默认 `false`）、`preset: Option<String>`、`mask4`/`mask6: Option<u8>`（`ecs_handler.rs:33-49`） |
+| `EcsHandler` | 运行时结构：全部字段在 `create` 期固化，**无内部状态、无依赖、无后台任务**（`ecs_handler.rs:51-59`） |
+| `EcsHandlerFactory` | `#[plugin_factory("ecs_handler")]`：`create` 走 YAML 配置，`quick_setup` 走 `ecs [ip[/mask]]` 参数（`ecs_handler.rs:148-182`） |
 
 辅助函数：
 
 | 函数 | 位置 | 语义 |
 |---|---|---|
-| `request_has_ecs` | `ecs_handler.rs:222-227` | 请求 OPT 里是否存在 `EdnsOption::Subnet` |
-| `strip_ecs_from_message` | `ecs_handler.rs:229-233` | `edns.remove(EdnsCode::Subnet)`——只删 Subnet 选项，OPT 记录与其他选项保留 |
-| `ensure_opt_record` | `ecs_handler.rs:235-237` | `Message::ensure_edns_mut()`，OPT 不存在时创建（`crates/proto/src/message.rs:545-550`） |
+| `request_has_ecs` | `ecs_handler.rs:225-230` | 请求 OPT 里是否存在 `EdnsOption::Subnet` |
+| `strip_ecs_from_message` | `ecs_handler.rs:232-236` | `edns.remove(EdnsCode::Subnet)`——只删 Subnet 选项，OPT 记录与其他选项保留 |
+| `ensure_opt_record` | `ecs_handler.rs:238-240` | `Message::ensure_edns_mut()`，OPT 不存在时创建（`crates/proto/src/message.rs:545-550`） |
 
 proto 层语义（`crates/proto/src/rdata/basic.rs`）：
 
@@ -63,7 +63,7 @@ proto 层语义（`crates/proto/src/rdata/basic.rs`）：
 | `mask4` | `24` | 合成 IPv4 ECS 的 `source_prefix`，>32 在 `create` 期报错 |
 | `mask6` | `48` | 合成 IPv6 ECS 的 `source_prefix`，>128 在 `create` 期报错 |
 
-quick setup（sequence 内联 `ecs [ip[/mask]]`，`ecs_handler.rs:160-178`）：
+quick setup（sequence 内联 `ecs [ip[/mask]]`，`ecs_handler.rs:163-181`）：
 
 - 等价于 `forward=false, send=false, mask4=24, mask6=48`，参数可选给 `preset`。
 - **`/mask` 后缀会被丢弃**：`ecs 203.0.113.7/24` 只取 IP 作为 `preset`，前缀仍用默认 24；`ecs 2001:db8::/32` 的 mask6 仍是 48 而非 32。要改前缀必须用完整 `args` 配置。
@@ -84,7 +84,7 @@ flowchart LR
 
 ## 5. 请求主路径
 
-`execute_with_next`（`ecs_handler.rs:86-101`）是唯一的执行入口，`execute` 直接委托给它（`next=None`，用于 standalone 场景）：
+`execute_with_next`（`ecs_handler.rs:88-103`）是唯一的执行入口，`execute` 直接委托给它（`next=None`，用于 standalone 场景）：
 
 ```mermaid
 sequenceDiagram
@@ -100,24 +100,24 @@ sequenceDiagram
     Up-->>Down: 响应
     Down-->>E: step
     alt forwarded = false
-        E->>E: strip_ecs_from_message(response)<br/>剥掉响应 ECS
+        E->>E: 剥掉响应 ECS + 剥掉请求 ECS<br/>(两侧清理)
     else forwarded = true
-        Note over E: 响应 ECS 原样保留
+        Note over E: 请求与响应的 ECS 原样保留
     end
     E-->>Seq: 透传 step
 ```
 
 关键点：
 
-- **返回值透传**：`continue_next!` 的结果原样返回（`Next`/`Stop`/`Return` 都不拦截），ecs_handler 只包络、不改控制流。链上后续执行器返回 `Stop`/`Return` 时同样先做响应侧剥离再上抛。
-- **`forwarded` 的判定发生在请求改写期**：只有"客户端自带 ECS 且 `forward=true`"才置位。合成 ECS（`send`/`preset`）不置位——合成路径下响应 ECS 一律剥离。
-- **响应剥离是无条件兜底**：即使 `context.response()` 尚未设置（比如下游链还没产出响应就返回了），`response_mut()` 为 `None` 时是 no-op；反之只要响应存在且 `forwarded=false`，其 OPT 中的 Subnet 选项被移除。
+- **返回值透传**：`continue_next!` 的结果原样返回（`Next`/`Stop`/`Return` 都不拦截），ecs_handler 只包络、不改控制流。链上后续执行器返回 `Stop`/`Return` 时同样先做两侧清理再上抛。
+- **`forwarded` 的判定发生在请求改写期**：只有"客户端自带 ECS 且 `forward=true`"才置位。合成 ECS（`send`/`preset`）不置位——合成路径下链后请求与响应的 ECS 一律剥离。
+- **两侧清理是无条件兜底**：只要 `forwarded=false`，链结束后请求与响应都不携带 ECS——覆盖三种残留来源：非 IN class 分支未处理的客户端 ECS（请求侧）、下游执行器可能注入的 ECS、本插件自己合成的 ECS。链**中**状态不受影响：上游在 `next()` 期间看到的仍是准备后的请求（含合成 ECS），cache 的插入校验等链中逻辑不受 post 清理干扰。
 
-为什么默认剥响应 ECS（模块文档 `ecs_handler.rs:14-16`）：当 ECS 是本服务器合成的（`send`/`preset`），它是**给上游看**的内部子网元数据，不是客户端声明的；上游应答可能回显带非零 `scope_prefix` 的 ECS（RFC 7871：scope 非零表示应答按该子网定制）。把这类元数据透传给下游客户端既泄漏内部拓扑，也可能违反 RFC 7871 第 7.1 节"代理不应把 ECS 转发给不期望它的客户端"的精神。只有客户端自己带了 ECS 且被转发时，响应里的 ECS 才是客户端预期的。
+为什么链后默认做两侧清理（模块文档 `ecs_handler.rs:14-18`）：当 ECS 是本服务器合成的（`send`/`preset`），它是**给上游看**的内部子网元数据，不是客户端声明的；上游应答可能回显带非零 `scope_prefix` 的 ECS（RFC 7871：scope 非零表示应答按该子网定制）。把这类元数据留在响应里透传给下游客户端既泄漏内部拓扑，也可能违反 RFC 7871 第 7.1 节"代理不应把 ECS 转发给不期望它的客户端"的精神；留在请求里则会被后续阶段（日志、更上游包裹插件）误读为客户端声明。只有客户端自己带了 ECS 且被转发时，两侧的 ECS 才是各方预期的，原样保留。
 
 ## 6. `prepare_request` 决策逻辑
 
-请求侧改写的完整分支（`ecs_handler.rs:105-142`）：
+请求侧改写的完整分支（`ecs_handler.rs:108-144`）：
 
 ```mermaid
 flowchart TD
@@ -146,7 +146,7 @@ flowchart TD
 
 1. **`preset` 独立于 `send`**：`preset` 命中时完全不看 `send`。`preset + send=true` 的组合里 `send` 只对"没配 preset 的部署"有意义；`preset` 未配置且 `send=false` 时，无 ECS 请求保持无 ECS。
 2. **合成的 `scope_prefix` 恒为 0**（`ClientSubnet::new(source_ip, mask, 0)`，`ecs_handler.rs:135`）：向上游声明"我没有作用域约束"，上游可自由决定是否返回 scope。响应侧的 scope 语义由 cache 的联动逻辑消化（第 7 节）。
-3. **非 IN class 的不对称处理**（`ecs_handler.rs:106-112`）：qclass 非 IN（或无 question）时请求侧完全不动——**即使 `forward=false`，客户端自带的 ECS 也留在请求里**（forward 透传后仍会到达上游）；但响应侧剥离照常生效（`forwarded=false`）。ECS 只对 IN 查询有意义，这是防御性的边界行为，见第 12 节。
+3. **非 IN class 的请求侧豁免**（`ecs_handler.rs:109-115`）：qclass 非 IN（或无 question）时 `prepare_request` 不做请求侧处理——客户端 ECS 在链**中**保持原样（forward 透传仍会到达上游，合成分支也不会触发）；但 post 阶段两侧清理照常生效（`forwarded=false`），链结束后请求与响应都不再携带 ECS。ECS 只对 IN 查询有意义，这是防御性的边界行为，见第 12 节。
 
 ## 7. 与 `cache` 的 ECS 作用域联动
 
@@ -209,7 +209,7 @@ flowchart TD
 
 ## 9. 性能要点
 
-- **热路径成本极低**：一次 `first_qclass` 读取、一次 OPT 选项线性查找（选项数通常个位数）、命中时一次 `remove`+`push`（`Arc::make_mut` 写时克隆 EDNS 内层）或一次 `remove`；无分配密集操作、无 I/O、无锁。
+- **热路径成本极低**：一次 `first_qclass` 读取、一次 OPT 选项线性查找（选项数通常个位数）、命中时一次 `remove`+`push`（`Arc::make_mut` 写时克隆 EDNS 内层）或一次 `remove`；`forwarded=false` 时链后追加一至两次 `remove`（响应 + 请求）；无分配密集操作、无 I/O、无锁。
 - **包裹但不深**：`with_next=true` 使它成为 continuation 包络，async 栈深 +1 层；除 `next()` 外无额外 await。
 - **无启动成本**：`create` 期完成全部解析/校验（mask 范围、preset 解析），`init` 为空。
 - `execute`/`execute_with_next` 均挂 `#[hotpath::measure]`（`ecs_handler.rs:80,85`）。
@@ -217,19 +217,20 @@ flowchart TD
 
 ## 10. 测试盘点
 
-`ecs_handler.rs:239-433`，8 个用例：
+`ecs_handler.rs:243-540`，9 个用例：
 
 | 测试 | 验证点 |
 |---|---|
 | `test_parse_handler_from_value_validation` | `mask4: 64` 在解析期报错；无 args 走默认 |
-| `test_ecs_handler_send_inserts_request_ecs_and_strips_response_ecs` | send 合成进请求 + 响应 ECS 被剥离 |
+| `test_ecs_handler_send_inserts_ecs_mid_chain_and_strips_both_after` | send 合成在链中可见（探测桩）+ 链后请求/响应两侧 ECS 剥离 |
 | `test_ecs_handler_forward_keeps_client_and_response_ecs` | forward 保留请求与响应两侧 ECS |
 | `test_ecs_handler_strips_client_ecs_when_forward_disabled`（及重复用例 `_from_request`） | forward=false 剥请求 ECS |
-| `test_ecs_handler_send_appends_ecs_to_existing_opt` | 已有 OPT（无 Subnet）时追加不重建 |
-| `test_ecs_handler_send_creates_opt_when_request_has_none` | 无 OPT 时创建 |
+| `test_ecs_handler_send_appends_ecs_to_existing_opt` | 已有 OPT（无 Subnet）时链中追加 |
+| `test_ecs_handler_send_creates_opt_when_request_has_none` | 无 OPT 时链中创建，链后 OPT 保留但 Subnet 移除 |
+| `test_ecs_handler_strips_unforwarded_client_ecs_from_non_in_request` | 非 IN class + forward=false：链后请求与响应 ECS 均剥离（post 两侧清理回归） |
 | `test_ecs_handler_strips_ecs_from_response` | 合成路径下响应 ECS 剥离 |
 
-覆盖缺口（与第 12 节对应）：无 `preset` 生效路径的测试、无非 IN class 分支的测试、无 quick setup `/mask` 丢弃行为的测试。
+链中状态用 `EcsProbe` 探测桩验证（`ecs_handler.rs:253-289`）：它记录下游执行时刻请求是否携带 ECS，从而把"合成确实发生过"与"链后清理"两个断言分开。覆盖缺口（与第 12 节对应）：无 `preset` 生效路径的测试、无 quick setup `/mask` 丢弃行为的测试。
 
 ## 11. 使用模式速查
 
@@ -259,8 +260,8 @@ flowchart TD
 ## 12. 已知边界与注意点
 
 1. **quick setup 丢弃 `/mask`**（第 3 节）：`ecs 2001:db8::/32` 的语义容易被误读为"前缀 32"，实际仍是 48。要精确控制前缀必须写完整 args。
-2. **非 IN class 时 `forward=false` 不剥请求侧 ECS**（第 6 节第 3 条）：客户端 ECS 原样到上游，与 IN class 行为不对称。因为剥离逻辑在 qclass 检查之后，可视为有意豁免（CH/TXT 类排查查询不改写），但依赖此行为前请确认上游预期。
+2. **非 IN class 时客户端 ECS 在链中仍会到达上游**（第 6 节第 3 条）：`prepare_request` 对非 IN 请求不做处理，`forward=false` 也不会提前剥离——上游在链执行期间看到的仍是原始请求；post 阶段才把两侧 ECS 清掉（自 `e23a1870` 起）。要保证上游完全看不到客户端 ECS，需保持 IN class 或在更上游自行剥离。
 3. **`preset` 不校验与 `mask` 的匹配**：`preset` 为 IPv6 而 `mask6` 缺省 48——若期望 `mask4`/`mask6` 跟随 preset 书写的前缀（quick setup 场景），会得到默认值。
 4. **合成 ECS 的 `scope_prefix` 恒 0**：不会向上游表达"请勿回显更宽 scope"；上游若回显非零 scope，响应 ECS 会被本插件剥掉（`forwarded=false`），cache 侧无作用域键 + scoped 回显的组合也会拒绝入缓存（第 7 节）——两层防御独立生效。
 5. **`cache` 之后的 ecs_handler 会让缓存永不命中**（第 7 节）：这是编排错误而非插件 bug，`oxidns check` 的依赖树能看到顺序，但不会对"语义顺序"报警。
-6. **响应剥离与 LIFO 收尾顺序的相互作用**：continuation 后处理按 LIFO 执行——**上游包裹插件的收尾最后执行**（见 `learning/oxidns-plugin-sequence.md` §6，`chain.rs:1124-1156` 测试）。ecs_handler 在链上游时，它的响应剥离在所有下游包裹插件收尾**之后**运行，能兜底剥掉下游回显的 ECS；反过来，若回显类插件（如配置了 code 8 的 `forward_edns0opt`）排在 ecs_handler **上游**，其收尾在最后，可能把 ECS 重新写回响应，绕过剥离。
+6. **两侧清理与 LIFO 收尾顺序的相互作用**：continuation 后处理按 LIFO 执行——**上游包裹插件的收尾最后执行**（见 `learning/oxidns-plugin-sequence.md` §6，`chain.rs:1124-1156` 测试）。ecs_handler 在链上游时，它的两侧清理在所有下游包裹插件收尾**之后**运行，能兜底剥掉下游回显的 ECS；反过来，若回显类插件（如配置了 code 8 的 `forward_edns0opt`）排在 ecs_handler **上游**，其收尾在最后，可能把 ECS 重新写回响应，绕过清理。
