@@ -215,7 +215,7 @@ flowchart TD
 - 入口先做协议层校验：伪造响应（QR=1）、非 Query opcode、EDNS version > 0 都不会进入管线，直接构造 REFUSED / BADVERS。
 - 只有通过校验才创建 `DnsContext`，然后调用 `entry_executor.execute_with_next(&mut context, None)`。传 `None` 表示"这是最外层链"，`sequence` 内部再把它自己的指令流接起来。
 - 执行结果只分三种：`Next`（自然结束）、`Stop`/`Return`（被插件控制）、`Err`（SERVFAIL）。
-- `finalize_response()` 统一补 RA、按请求补 EDNS、按 `disable_ecs` 剥离响应里的 ECS 回显。
+- `finalize_response()` 统一补 RA、按请求补 EDNS。
 
 ### 7.1 ExecStep 与 next 续延
 
