@@ -37,6 +37,8 @@
 - `README.md` and `README_EN.md` describe the architecture and capability set; keep them aligned with behavior changes.
 - Detailed internal architecture and dependency-boundary guidance lives in `ai/architecture.md`.
 - WebUI-specific guidance lives in `ai/webui.md`; follow it for changes under `webui/`.
+- `learning/` holds long-form implementation analyses and the standalone architecture page; treat them as study material rather than the behavior contract.
+- `pr-doc/` holds design notes and PR series write-ups kept for review history; code, configuration, and tests remain the source of truth.
 
 ## Build, Test, and Development Commands
 
