@@ -225,6 +225,7 @@ impl RequestHandle {
 
 #[cfg(test)]
 mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
     use std::sync::Mutex;
 
     use async_trait::async_trait;
@@ -234,7 +235,6 @@ mod tests {
     use crate::infra::error::Result;
     use crate::plugin::Plugin;
     use crate::proto::{ClientSubnet, EdnsOption, Name, Question, RecordType};
-    use std::net::{IpAddr, Ipv4Addr};
 
     fn make_request(id: u16, qname: &str) -> Message {
         let mut request = Message::new();
