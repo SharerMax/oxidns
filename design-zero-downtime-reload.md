@@ -76,6 +76,8 @@ pub(crate) fn install_runtime(registry: PluginRegistry);   // 原有全局副作
 
 配套引入 `PluginCreateContext { candidate: bool }`(registry 已有 `PluginCreateContext`,加一个标志):
 
+> 注:该标志最终没有落地——延迟副作用由指标 staging 与候选 API hub 承担,`candidate` 字段已于提交 `31f20124` 从 `PluginCreateContext` 删除。
+
 - `candidate: true` 时,插件的 `init` 侧副作用**延迟注册**:
   - `register_metric_source` → 改为登记在 registry 内的 pending 列表,install 阶段统一提交(避免同 tag 冲突);
   - `task_center::spawn_*`(池巡检、dump、cron)→ 同样 pending,install 时启动;

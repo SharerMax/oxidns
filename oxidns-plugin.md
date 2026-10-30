@@ -54,7 +54,7 @@ OxiDNS 把协议、策略、数据集都拆成插件，运行时只有一条以 
 | `UninitializedPlugin` | 工厂返回的未初始化枚举（四个变体），`init_and_wrap()` 负责 `init` + `Arc` 包装 |
 | `PluginHolder` | 已初始化的四类 `Arc<dyn ...>` |
 | `PluginInfo` | 实例容器：`tag`、`plugin_name`、`plugin_type`、`plugin_holder`、`args`、`runtime_control` |
-| `PluginCreateContext` | 创建期元数据：`dependents`（反向依赖列表）、`candidate` |
+| `PluginCreateContext` | 创建期元数据：`dependents`（反向依赖列表），当前无生产消费者 |
 | `PluginInitContext<'a>` | 传给 `create` / `init` 的解析器句柄：`executor()`、`matcher_ref()`、`provider()`、`init_quick_setup()` |
 | `PluginRuntimeManager` | 全局运行时拥有者：`RwLock<Option<Arc<PluginRuntime>>>` + 生命周期异步锁 + `AppController` |
 
@@ -393,13 +393,19 @@ flowchart TD
 
 1. **类别靠模块路径字符串推断**：新增插件若不在 `src/plugin/<category>/` 下会被判为 `Unknown`，`plugin::tests` 只能覆盖"已注册项"，无法阻止新目录写错。
 2. **未引用的 provider 会被静默跳过**：只声明不用会得到一条 warn，实例不存在；如果将来出现"仅供 API 使用"的 provider，这条裁剪规则需要重新评估。
-3. **`PluginCreateContext` 有两个未落地字段**：`candidate` 恒为 `false`，注释说"为 staged-reload 预留"，但 staged reload 已经实现且不依赖它；`dependents` 只有测试在用。属于历史残留，容易误导。
-4. **`Server::run()` 没有调用点**：四个 server 实现都定义了它，但绑定与 spawn 实际发生在 `init()` 内。保留的死方法会让新插件作者误以为需要外部驱动。
-5. **`resolve_dependencies()` 非测试构建未使用**：真正的路径是 `analyze_dependencies()` + `init_plan`，旧函数仅 `allow(dead_code)` 保留。
-6. **依赖声明解析失败会被吞掉**：`sequence`、`cron` 等在 `get_dependency_specs()` 里对 YAML 解析失败直接返回空列表，导致"依赖图看起来正常"，真正的配置错误推迟到 `create()` 才报。诊断位置后移，配置复杂时可读性下降。
-7. **校验与创建是两条路径**：`validate_configuration()` 只做图分析，不调用 `create()`，所以 `oxidns check` 通过不代表参数能成功解析。
-8. **每次校验都实例化全部工厂**：`analyze_configuration()` 遍历 inventory 时为所有注册类型构造工厂（不只为配置里的类型），启动期成本随插件总数线性增长。
-9. **`PluginHolder` 的强转是 panic 式**：`to_executor()` 等在不匹配时直接 `panic!`。正常路径由 `get_*_dependency` 提前校验，但绕过 registry 直接强转属于未定义使用。
+3. **`PluginCreateContext.dependents` 仍无生产消费者**：只有 `registry::tests` 用它验证裁剪结果，字段本身保留是为了给"需要知道自己被谁引用"的插件留接口。
+4. **`resolve_dependencies()` 非测试构建未使用**：真正的路径是 `analyze_dependencies()` + `init_plan`，旧函数仅 `allow(dead_code)` 保留。
+5. **依赖声明解析失败会被吞掉**：`sequence`、`cron` 等在 `get_dependency_specs()` 里对 YAML 解析失败直接返回空列表，导致"依赖图看起来正常"，真正的配置错误推迟到 `create()` 才报。诊断位置后移，配置复杂时可读性下降。
+6. **校验与创建是两条路径**：`validate_configuration()` 只做图分析，不调用 `create()`，所以 `oxidns check` 通过不代表参数能成功解析。
+7. **每次校验都实例化全部工厂**：`analyze_configuration()` 遍历 inventory 时为所有注册类型构造工厂（不只为配置里的类型），启动期成本随插件总数线性增长。
+8. **`PluginHolder` 的强转是 panic 式**：`to_executor()` 等在不匹配时直接 `panic!`。正常路径由 `get_*_dependency` 提前校验，但绕过 registry 直接强转属于未定义使用。
+
+### 已在 `fix/code-review-priorities` 清理的历史残留
+
+| 残留 | 处理 | 提交 |
+|---|---|---|
+| `PluginCreateContext.candidate` 恒为 `false`、无消费者，注释与 staged reload 的实际实现矛盾 | 删除字段；同处补齐 `dependents` 文档 | `31f20124` |
+| `Server::run()` 无调用点，绑定与 spawn 实际发生在 `init()` | 保留 trait 方法但标记 `#[deprecated]`，doc 指向 `Plugin::init` | `31f20124` |
 
 ## 15. 相关测试
 
