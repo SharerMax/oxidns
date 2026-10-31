@@ -201,7 +201,6 @@ impl RequestHandle {
 
 #[cfg(test)]
 mod tests {
-    use std::net::{IpAddr, Ipv4Addr};
     use std::sync::Mutex;
 
     use async_trait::async_trait;
