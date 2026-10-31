@@ -3,7 +3,7 @@
 > 分析基线：`v1.6.1`，分支 `fix/code-review-priorities`（HEAD `04ac8a64`）。
 > 代码位置：`src/plugin/registry/`（`catalog.rs` 89 行、`context.rs` 194 行、`init_plan.rs` 136 行、`mod.rs` 678 行、`runtime.rs` 370 行、`tests.rs` 714 行）；
 > 运行时结构定义在 `src/plugin/mod.rs`（593 行），依赖分析在 `src/plugin/dependency.rs`（664 行），应用集成在 `src/app/bootstrap.rs` 与 `src/app.rs`。
-> 生态位概述见 `learning/oxidns-plugin.md`；本文只描述当前代码实际行为；与文档/注释不一致之处集中在第 13 节。
+> 生态位概述见 `../oxidns-plugin.md`；本文只描述当前代码实际行为；与文档/注释不一致之处集中在第 13 节。
 
 ## 1. 定位
 

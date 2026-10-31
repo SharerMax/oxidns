@@ -2,7 +2,7 @@
 
 > 分析基线：`v1.6.1`，分支 `fix/code-review-priorities`（HEAD `04ac8a64`）。
 > 代码位置：`src/plugin/matcher/`（`mod.rs` 192 行、`control.rs` 149 行、`rules/` 528 行、20 个插件共约 4100 行，均含测试）；
-> 消费方接线在 `src/plugin/executor/sequence/chain.rs`，运行时控制注册见 `learning/oxidns-plugin-registry.md` 第 7/9 节。
+> 消费方接线在 `src/plugin/executor/sequence/chain.rs`，运行时控制注册见 `../registry/oxidns-plugin-registry.md` 第 7/9 节。
 > 本文只描述当前代码实际行为；与文档/注释不一致之处集中在第 11 节。
 
 ## 1. 类别定位

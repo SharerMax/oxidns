@@ -291,7 +291,7 @@ DNSSEC 审慎（`response_requires_dnssec_caution`，`policy.rs:112-125`）：�
 | `cache` | 编排上 ip_selector 在前。cache 在**链中**按完整 RRset 建键回填；ip_selector 的整形发生在 cache 的 `execute_with_next` 返回之后，不影响缓存内容。反序（cache 在前）时：命中且 `short_circuit: true` 会直接短路返回，整形完全被绕过；`short_circuit: false` 则每次命中都在返回路径重新整形（缓存里存的是未整形 RRset，整形结果不被复用） | |
 | `forward` / `fallback` | 无交互：上游竞速归它们，本插件只看最终响应 |
 | `prefer_ipv4` / `prefer_ipv6`（`dual_selector.rs`） | 互补：双栈抑制（A/AAAA 互斥）归它们；同族内选优归本插件。可串联 |
-| `ecs_handler` | 同为 with_next 返回路径处理器。两者都在链上游时，LIFO 决定整形先后（见 `learning/oxidns-plugin-sequence.md` §6）——ip_selector 重排不影响 ECS 剥离，但若 ecs_handler 在其上游，其收尾（剥 ECS）最后执行 |
+| `ecs_handler` | 同为 with_next 返回路径处理器。两者都在链上游时，LIFO 决定整形先后（见 `oxidns-plugin-sequence.md` §6）——ip_selector 重排不影响 ECS 剥离，但若 ecs_handler 在其上游，其收尾（剥 ECS）最后执行 |
 | `sequence` | 依赖图零出边；放置顺序全靠 sequence 编排，静态检查不做语义顺序告警 |
 
 ## 14. 已知边界与注意点

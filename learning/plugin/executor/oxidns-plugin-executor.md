@@ -2,7 +2,7 @@
 
 > 分析基线：`v1.6.1`，分支 `fix/code-review-priorities`（HEAD `5d7173bb`）。
 > 代码位置：契约在 `src/plugin/executor/mod.rs`（138 行），实现在 `src/plugin/executor/*` 33 个工厂类型 + `prefer_ipv4`/`prefer_ipv6`，continuation 类型本体在 `src/plugin/executor/sequence/chain.rs`。
-> 系统级视角见 `learning/oxidns-plugin.md`；单个 executor 深析见 `oxidns-plugin-cache.md` / `oxidns-plugin-sequence.md` / `oxidns-plugin-ecs-handler.md` / `oxidns-plugin-ip-selector.md`。
+> 系统级视角见 `../oxidns-plugin.md`；单个 executor 深析见 `oxidns-plugin-cache.md` / `oxidns-plugin-sequence.md` / `oxidns-plugin-ecs-handler.md` / `oxidns-plugin-ip-selector.md`。
 > 本文只描述当前代码实际行为；与文档/注释不一致之处集中在第 11 节。
 
 ## 1. 定位：四类插件中唯一的"主动"类别
@@ -90,7 +90,7 @@ sequenceDiagram
     W-->>P: W 的返回值即本层最终 ExecStep
 ```
 
-两种模式的关键差异（详见 `learning/oxidns-plugin-sequence.md` §6）：
+两种模式的关键差异（详见 `oxidns-plugin-sequence.md` §6）：
 
 | 维度 | plain | wrapping |
 |---|---|---|
@@ -177,14 +177,14 @@ flowchart TD
 要点：
 
 - `UninitializedPlugin::Executor(Box<dyn Executor>)`（`plugin/mod.rs:70-82`）是工厂的产物；`init_and_wrap`（`plugin/mod.rs:84+`）完成 `init` 并升级为 `Arc`。**Box 在创建期、Arc 在 init 后**——create 阶段还无法拿到依赖（被引用的插件可能未初始化）。
-- 拓扑顺序保证"被引用者先初始化"，这是"sequence 在 init 期才解析 `Arc`"安全的前提（见 `learning/oxidns-plugin-sequence.md` §4）。
-- 请求路径上没有注册表查找：所有引用在启动期固化（系统级设计三约束之一，`learning/oxidns-plugin.md` §1）。
+- 拓扑顺序保证"被引用者先初始化"，这是"sequence 在 init 期才解析 `Arc`"安全的前提（见 `oxidns-plugin-sequence.md` §4）。
+- 请求路径上没有注册表查找：所有引用在启动期固化（系统级设计三约束之一，`../oxidns-plugin.md` §1）。
 
 ## 6. 错误与控制流语义
 
 - **`Err` 一律向上传播，无内建降级**：任何 executor 返回错误即从 `ChainProgram` 冒泡到 server，服务端统一 SERVFAIL（`server/request.rs:132-141`）。降级是插件职责（`fallback`）由 sequence 显式编排，不是运行时隐式行为。
 - wrapping 执行器的 `next()` 返回错误时，收尾逻辑仍会执行（`?` 在其内部消化）——`chain.rs` 测试 `test_run_bubbles_execute_error_after_running_with_next_cleanup` 固化了这一保证。
-- `ExecStep` 的跨层传播规则（jump/goto 对 `Stop`/`Return` 的不同处理）见 `learning/oxidns-plugin-sequence.md` §7.3，此处不重复。
+- `ExecStep` 的跨层传播规则（jump/goto 对 `Stop`/`Return` 的不同处理）见 `oxidns-plugin-sequence.md` §7.3，此处不重复。
 
 ## 7. 热路径规范与可观测性
 
@@ -257,10 +257,10 @@ flowchart TD
 
 ## 11. 已知边界与注意点
 
-1. **wrapping 是截断点**：`with_next=true` 的执行器之后的规则折叠进 `next`，其返回值就是整层的最终 `ExecStep`。在 sequence 中把它后面的指令当作"一定会执行"是错误假设（`learning/oxidns-plugin-sequence.md` §12 第 2 条）。
+1. **wrapping 是截断点**：`with_next=true` 的执行器之后的规则折叠进 `next`，其返回值就是整层的最终 `ExecStep`。在 sequence 中把它后面的指令当作"一定会执行"是错误假设（`oxidns-plugin-sequence.md` §12 第 2 条）。
 2. **`with_next()` 必须恒定**：sequence 在 init 期读一次就编译成操作码，请求期不查。trait 允许返回动态值（`fallback.rs:440-443` 的测试桩就动态返回），但生产实现若让该值随请求变化，init 期的操作码选择会与运行期实际行为错配。
 3. **`with_next=false` 时自定义 `execute_with_next` 不被 sequence 调用**：sequence 只会走 `Executor` 操作码调 `execute()`。想让环绕逻辑生效必须同时返回 `true`。反向（`with_next=true` 却不调 `next`）是合法短路，但等价于丢弃后续指令——需要显式文档化。
 4. **默认 `execute_with_next` 无实际使用者**：15 个 wrapping 执行器全部自定义了该方法。默认实现（`execute` + 透传）语义上是"透明包裹"，保留它主要为了 standalone 调用路径（如 `execute` 委托 `execute_with_next(None)` 的模式，`ecs_handler.rs:82-85`）。
-5. **工厂吞依赖解析错误的风险**：`get_dependency_specs` 在 YAML 解析失败时返回空列表会让依赖图"看起来正常"（`learning/oxidns-plugin.md` §14 第 5 条，sequence 实例）。新 executor 应让解析失败直接报错。
-6. **嵌套深度与 async 栈**：每层 wrapping 是一层 async 栈；`sequence` 内部用显式 pc 循环避免同层递归（`learning/oxidns-plugin-sequence.md` §10），但 jump/goto/多层包裹仍按嵌套加深。深链配置需留意。
+5. **工厂吞依赖解析错误的风险**：`get_dependency_specs` 在 YAML 解析失败时返回空列表会让依赖图"看起来正常"（`../oxidns-plugin.md` §14 第 5 条，sequence 实例）。新 executor 应让解析失败直接报错。
+6. **嵌套深度与 async 栈**：每层 wrapping 是一层 async 栈；`sequence` 内部用显式 pc 循环避免同层递归（`oxidns-plugin-sequence.md` §10），但 jump/goto/多层包裹仍按嵌套加深。深链配置需留意。
 7. **`dual_selector` 是双类型注册的唯一特例**：`prefer_ipv4`/`prefer_ipv6` 共享实现、仅 `RecordType` 不同。再遇到"同一实现多个类型名"时照此模式，不要用属性宏复制粘贴两个空 struct。

@@ -264,4 +264,4 @@ flowchart TD
 3. **`preset` 不校验与 `mask` 的匹配**：`preset` 为 IPv6 而 `mask6` 缺省 48——若期望 `mask4`/`mask6` 跟随 preset 书写的前缀（quick setup 场景），会得到默认值。
 4. **合成 ECS 的 `scope_prefix` 恒 0**：不会向上游表达"请勿回显更宽 scope"；上游若回显非零 scope，响应 ECS 会被本插件剥掉（`forwarded=false`），cache 侧无作用域键 + scoped 回显的组合也会拒绝入缓存（第 7 节）——两层防御独立生效。
 5. **`cache` 之后的 ecs_handler 会让缓存永不命中**（第 7 节）：这是编排错误而非插件 bug，`oxidns check` 的依赖树能看到顺序，但不会对"语义顺序"报警。
-6. **两侧清理与 LIFO 收尾顺序的相互作用**：continuation 后处理按 LIFO 执行——**上游包裹插件的收尾最后执行**（见 `learning/oxidns-plugin-sequence.md` §6，`chain.rs:1124-1156` 测试）。ecs_handler 在链上游时，它的两侧清理在所有下游包裹插件收尾**之后**运行，能兜底剥掉下游回显的 ECS；反过来，若回显类插件（如配置了 code 8 的 `forward_edns0opt`）排在 ecs_handler **上游**，其收尾在最后，可能把 ECS 重新写回响应，绕过清理。
+6. **两侧清理与 LIFO 收尾顺序的相互作用**：continuation 后处理按 LIFO 执行——**上游包裹插件的收尾最后执行**（见 `oxidns-plugin-sequence.md` §6，`chain.rs:1124-1156` 测试）。ecs_handler 在链上游时，它的两侧清理在所有下游包裹插件收尾**之后**运行，能兜底剥掉下游回显的 ECS；反过来，若回显类插件（如配置了 code 8 的 `forward_edns0opt`）排在 ecs_handler **上游**，其收尾在最后，可能把 ECS 重新写回响应，绕过清理。

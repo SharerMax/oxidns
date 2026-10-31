@@ -2,7 +2,7 @@
 
 > 分析基线：`v1.6.1`，分支 `fix/code-review-priorities`（HEAD `b1d81777`）。
 > 代码位置：`src/plugin/executor/forward/`，响应分类复用 `src/core/response.rs`，上游抽象复用 `src/infra/network/upstream/`。
-> 生态位概述见 `learning/oxidns-plugin.md`；本文只描述当前代码实际行为；与文档/注释不一致之处集中在第 12 节。
+> 生态位概述见 `../oxidns-plugin.md`；本文只描述当前代码实际行为；与文档/注释不一致之处集中在第 12 节。
 
 ## 1. 插件定位
 

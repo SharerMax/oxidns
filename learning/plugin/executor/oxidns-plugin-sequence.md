@@ -2,7 +2,7 @@
 
 > 分析基线：`v1.6.1`，分支 `fix/code-review-priorities`（HEAD `9ed5f08f`）。
 > 代码位置：`src/plugin/executor/sequence/`（`mod.rs` 609 行、`chain.rs` 1507 行，均含测试）。
-> 生态位概述见 `learning/oxidns-plugin.md` 第 7 节；本文是对 sequence 自身的完整展开。
+> 生态位概述见 `../oxidns-plugin.md` 第 7 节；本文是对 sequence 自身的完整展开。
 > 本文只描述当前代码实际行为；与文档/注释不一致之处集中在第 13 节。
 
 ## 1. 插件定位
@@ -337,7 +337,7 @@ sequenceDiagram
 
 ## 13. 已知边界与注意点
 
-1. **`get_dependency_specs` 吞解析错误**（与 `learning/oxidns-plugin.md` 第 14 节第 5 条一致）：`mod.rs:350-355` 中 YAML 解析失败直接返回空依赖列表，依赖图看起来正常；真正的报错推迟到 `create()`。配置复杂时建议配合 `oxidns check` 使用。
+1. **`get_dependency_specs` 吞解析错误**（与 `../oxidns-plugin.md` 第 14 节第 5 条一致）：`mod.rs:350-355` 中 YAML 解析失败直接返回空依赖列表，依赖图看起来正常；真正的报错推迟到 `create()`。配置复杂时建议配合 `oxidns check` 使用。
 2. **with_next executor 之后的主观顺序假设**：见第 12 节最后一条，这是 continuation 模型的固有语义而非 bug，但容易误用。
 3. **jump/goto 目标只能是 sequence**：想在 `exec` 里"跳转"到普通 executor 直接写 `$tag` 即可；jump 的额外价值只在子链控制流。
 4. **最外层 `return` ≡ `accept`**：服务端把两者都归为 `Controlled`（第 7.4 节），`Return` 的"交回调用方"语义只在 sequence 嵌套中可观察。
