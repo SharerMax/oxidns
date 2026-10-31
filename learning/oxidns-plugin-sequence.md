@@ -169,8 +169,8 @@ flowchart TD
     E1 -->|"Next"| ADV
     E1 -->|"Stop / Return"| DONE["Complete(step) 终结本层"]
     E1 -->|Err| ERR["错误向上传播"]
-    OP -->|ExecutorWithNext| W1["executor.execute_with_next(ctx, Some(next=pc+1))"]
-    W1 -->|任何 Ok(step)| DONE
+    OP -->|ExecutorWithNext| W1["execute_with_next 传入 next 续延<br/>从 pc+1 恢复后半段"]
+    W1 -->|任何 Ok step| DONE
     W1 -->|Err| ERR
     OP -->|Builtin| B1["执行内建语义"]
     B1 -->|"Continue 语义"| ADV

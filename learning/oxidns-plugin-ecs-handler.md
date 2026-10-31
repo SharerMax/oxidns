@@ -131,7 +131,7 @@ flowchart TD
     FWD -->|false| STRIP["strip_ecs_from_message(request)<br/>forwarded = false"]
     HAS -->|否| SRC{"preset 或 send?"}
     SRC -->|"preset 配置了"| P1["source_ip = normalize(preset)"]
-    SRC -->|"preset 无, send=true"| P2["source_ip = normalize(peer_ip)"]
+    SRC -->|"无 preset 但 send 开启"| P2["source_ip = normalize(peer_ip)"]
     SRC -->|"两者皆无"| NOPE["不合成"]
     P1 --> MASK["mask = V4?mask4:mask6<br/>ClientSubnet::new(ip, mask, 0)"]
     P2 --> MASK

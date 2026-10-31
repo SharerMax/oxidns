@@ -136,7 +136,7 @@ flowchart TD
     S["select_response_ips(ctx)"] --> Q{"eligible_qtype?<br/>恰 1 个 question + qtype A/AAAA<br/>+ 响应存在 + rcode==NOERROR"}
     Q -->|否| OUT["原样返回"]
     Q -->|是| DS{"DNSSEC 敏感?<br/>请求 DO 位 或 响应含覆盖 qtype 的 RRSIG"}
-    DS -->|"是 且 policy=skip"| OUT2["原样返回 + Fallback 计数"]
+    DS -->|"是 且 policy 为 skip"| OUT2["原样返回 + Fallback 计数"]
     DS -->|是| N0["effective_top_n = 0<br/>(reorder-only: 不删签名 RRset 成员)"]
     DS -->|否| N1["effective_top_n = settings.top_n"]
     N0 --> CAND
