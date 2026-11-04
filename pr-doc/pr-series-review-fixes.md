@@ -1,100 +1,116 @@
 # PR 系列:评审修复(Review Fixes)
 
-将分支 `fix/code-review-priorities` 上代码评审产生的修复提交,按子系统拆为五个可独立评审的系列。两个重构系列(staged-reload / semaphore-pools)见各自文档;本文覆盖其余全部提交。
+将分支 `fix/code-review-priorities` 上代码评审产生的修复提交,按子系统拆为可独立评审的系列。两个重构系列(staged-reload / semaphore-pools)见各自文档;本文覆盖其余全部提交。
+
+> **现状(2026-11)**
+> - 系列 1(PR #401)与系列 2(PR #402)已合入 `release/v1.7.0`(merge `52ae666c` / `12f6de71`);上游在 #402 合入后又补了 opcode/DoQ 修复(#412, `4daa4f2c`),本系列无需再动。
+> - 分支已合并 `origin/main`(`488237ff`,+6 提交:docker ARMv7、hotpath-cloud 配置);**未**合并 release。
+> - 系列 3 的 PR 分支 `fork/fix/cache-hardening` 已推送(相对 release 的 diff 为 9 个提交:7 系列 + `bc838851`(拆文档)+ `ea831344`(fmt)+ 1 个 release 合并);PR **未建**,正文见 `pr-doc/pr-body-cache-hardening.md`。建议标注 P0。
+> - 系列 4/5、semaphore、staged 均**未建 PR**。
 
 全局依赖说明:
 
-- `87cad1b2`(chore: satisfy rustfmt and clippy on windows nightly)横跨 api / upstream / upgrade 三个系列的文件(auth.rs 导入重排、dial.rs 死代码清理、h2/h3 BufMut、upgrade cfg 门控),**必须**在它依赖的提交之后 cherry-pick:api 系列的 `06b42ea1`、upstream 系列的 `4db4f6a0` 与 `d08d26e7`。建议放在这些系列中**最后合并的一个**里,或手工拆分。不携带它不影响 Linux CI(这些是 Windows nightly clippy 的 lint)。
-- 推荐合并顺序:五个评审系列(互相独立)→ semaphore-pools(需 `3f14471d` 上下文)→ staged-reload(体量最大,评审周期最长)。
-- 分支元数据提交共 5 个,不进入上游 PR:`150e615e`/`47d55ae6`(设计文档状态)、`06f0e734`/`b6e7791e`(PR 系列拆分文档)与 `433ee0a5`(PR 系列文档同步 single-flight 提交);设计文档本身(`design-*.md`)可随对应系列携带,也可不带。
+- `87cad1b2`(chore: satisfy rustfmt and clippy on windows nightly)横跨 api / upstream / upgrade 三个系列的文件,**必须**在它依赖的提交之后 cherry-pick:api 系列的 `06b42ea1`(已随 #401 合入)、upstream 系列的 `4db4f6a0` 与 `d08d26e7`。建议随**最后合并**的系列携带,或手工拆分;不携带不影响 Linux CI。系列 1/2 已合入且未携带。
+- 合并顺序建议:系列 3(先发,P0)→ semaphore(需 `3f14471d` 上下文)→ staged-reload(体量最大)。
+- 分支元数据提交共 34 个(含 1 个与 `origin/main` 的合并),不进入上游 PR;其中学习笔记性质的子集只作研究素材。
 
 ---
 
-## 系列 1:管理 API 加固(3 提交)
+## 系列 1:管理 API 加固(3 提交)— ✅ 已合入(#401)
 
-PR 标题建议:`fix(api): harden request body, auth, and config save`
-
-| # | 提交 | 内容 |
-|---|---|---|
-| 1 | `4a47f389` | 请求体 4MiB 上限——`read_hyper_request` 原先在鉴权之前无限收集 body,未认证客户端可 OOM;返回 413 |
-| 2 | `06b42ea1` | Basic auth 恒时比较(XOR 累积,消除前缀计时信号)+ scheme 大小写不敏感(RFC 7235)|
-| 3 | `0d13fa54` | `PUT /config` 互斥串行化(TOCTOU)+ temp-file rename 原子写;版本号取自写入内容 |
-
-cherry-pick 顺序即上表;三者互相独立。测试:新增恒时比较 4 项;既有 API 测试全绿。
-
-## 系列 2:DNS 服务加固(8 提交)
-
-PR 标题建议:`fix(server): ingress validation, framing, and drain hardening`
+PR 标题:`fix(api): harden request body, auth, and config save`
 
 | # | 提交 | 内容 |
 |---|---|---|
-| 1 | `359b9a35` | TCP keepalive 补 `with_time`——TCP_KEEPIDLE 原为系统默认 ~2h,`idle_timeout` 形同虚设 |
-| 2 | `3786db4b` | DoQ/DoH3 每流/每请求任务纳入 TaskTracker,关停排水与 UDP/TCP 对齐 |
-| 3 | `be372447` | 入站 QR/opcode 预检——QR=1 伪造包不再进流水线,直接 REFUSED |
-| 4 | `9c82d833` | 恶意 UDP 包逐包 warn 降为 debug(防日志洪水);socket 级错误保留 warn |
-| 5 | `7316413c` | TCP 帧长 u16 截断由 debug_assert 改硬校验(防流错位) |
-| 6 | `b1fc8490` | EDNS version>0 回 BADVERS(RFC 6891 6.1.3)|
-| 7 | `3d00fd4f` | fallback:`threshold: 0` 尊重为立即待命(serde 默认 500,文档同步);备链闸 select 加 `biased` |
-| 8 | `f9055c07` | UDP 预检前移到任务创建之前——垃圾包零任务成本(与 #3 语义配套,#3 先合)|
+| 1 | `4a47f389` | 请求体 4MiB 上限;超出返回 413 |
+| 2 | `06b42ea1` | Basic auth 恒时比较 + scheme 大小写不敏感 |
+| 3 | `0d13fa54` | `PUT /config` 互斥串行化 + temp-file rename 原子写 |
 
-按表序 cherry-pick;#8 依赖 #3(同一校验语义的 task 前移)。
+测试:恒时比较 4 项;既有 API 测试全绿。已合入。
 
-## 系列 3:缓存正确性与性能(6 提交)
+## 系列 2:DNS 服务加固(8 提交)— ✅ 已合入(#402)
 
-PR 标题建议:`fix(cache): ECS scope validation, single-flight, and persistence hardening`
+PR 标题:`fix(server): ingress validation, framing, and drain hardening`
 
 | # | 提交 | 内容 |
 |---|---|---|
-| 1 | `cc079fc7` | **P0**:insert/lazy 刷新时校验请求当前 ECS scope 与 key 一致 + 拒绝 scope>0 回显答案——修复跨客户端缓存污染;新增 `ecs_scope_mismatch` 计数与 3 项测试 |
-| 2 | `53f80b16` | 采样 LRU 加旋转游标——后段分片不再免于淘汰 |
-| 3 | `c3078f54` | dump 序列化移入 `spawn_blocking`;staging 文件名加 pid+序号(重载期新旧实例不交错)|
-| 4 | `62594797` | lazy 无 stale 窗口语义文档化(`lazy_cache_ttl < ttl` 时无 stale 窗口;未开 short_circuit 不回写)|
-| 5 | `4c4cb1dc` | 冷/过期 miss single-flight——leader/follower 去重,消除热门域名过期风暴;`enable()`+复查防唤醒丢失;`cache_single_flight_wait_total` 计数;2 项新测试 |
-| 6 | `659dcf15` | single-flight leader 失败后有界重新选举(共享等待预算,轮次耗尽自行取数);`single_flight_wait_ms` / `single_flight_max_rounds` 配置化并校验非 0;`cache_single_flight_wait_total` 补齐指标文档、WebUI schema/本地化与字段说明 |
+| 1 | `359b9a35` | TCP keepalive 补 `with_time`(TCP_KEEPIDLE) |
+| 2 | `3786db4b` | DoQ/DoH3 任务纳入 TaskTracker,关停排水对齐 |
+| 3 | `be372447` | 入站 QR/opcode 预检,回答 REFUSED |
+| 4 | `9c82d833` | 恶意 UDP 包 warn 降为 debug |
+| 5 | `7316413c` | TCP 帧长 u16 硬校验 |
+| 6 | `b1fc8490` | EDNS version>0 回 BADVERS |
+| 7 | `3d00fd4f` | fallback `threshold: 0` 尊重 + select `biased` |
+| 8 | `f9055c07` | UDP 预检前移到任务创建前 |
 
-按表序;#5 依赖 #1 的同文件上下文;#6 依赖 #5 的同文件上下文。
+已合入;上游 #412(`4daa4f2c`,opcode 响应修正 + DoQ 关停解堵)已兜底。
 
-## 系列 4:上游与协议健壮性(7 提交)
+## 系列 3:缓存正确性与性能(7 提交)
 
-PR 标题建议:`fix(upstream): bound responses, async resolution, and unpredictable IDs`
-
-| # | 提交 | 内容 |
-|---|---|---|
-| 1 | `4db4f6a0` | 系统 DNS 解析移入 `spawn_blocking`(connect_udp 改异步)——系统解析器卡顿不再占满 tokio worker;deadline 可取消 |
-| 2 | `d08d26e7` | 上游 DoH/H2/H3 响应体 64KiB 硬上限(Content-Length 钳制 + 分块校验)——恶意上游不再能触发 GB 级分配 |
-| 3 | `21ff3d0c` | bootstrap 查询改 `load_full`——不再跨整程持有 ArcSwap Guard |
-| 4 | `fc424339` | 上游事务 ID 随机起点 + 随机奇数步长(封 Kaminsky 可预测性);配套测试更新 |
-| 5 | `1f828545` | style:上游 rustfmt 十六进制字面量(#4 的格式尾随,可 squash 进 #4)|
-| 6 | `202a8403` | 压缩指针环检测 O(n²)→O(1)——强制指针严格前指(RFC 1035),封死 ~1000× CPU 放大 |
-| 7 | `71d699d8` | probe 阻塞操作改走 tokio 有界阻塞池(封无界线程创建)|
-
-按表序;#4+#5 合并处理;#6 在 `crates/proto`(若上游按 crate 拆分评审可单独成 PR)。
-
-## 系列 5:平台(Windows)与升级(3 提交)
-
-PR 标题建议:`fix(service,upgrade): graceful SCM stop and upgrade hardening`
+PR 标题:`fix(cache): ECS scope validation, single-flight, and persistence hardening`
 
 | # | 提交 | 内容 |
 |---|---|---|
-| 1 | `0145cf63` | Windows SCM Stop 优雅关停——oneshot 通知应用排水(≤20s),替代立即 exit(0);Restart 编舞不变 |
-| 2 | `d10edfa7` | 服务错误路径 exit(1)——SCM OnFailure 重启策略恢复生效 |
-| 3 | `2c026e91` | 升级:下载总超时 30s→300s;二进制回滚失败从 `let _ =` 吞掉改为 error 日志 |
+| 1 | `cc079fc7` | **P0**:insert/lazy 刷新校验 ECS scope 一致 + 拒绝 scope>0 回显——修复跨客户端缓存污染;`ecs_scope_mismatch` 计数 |
+| 2 | `53f80b16` | 采样 LRU 旋转游标 |
+| 3 | `c3078f54` | dump 序列化移入 `spawn_blocking`;staging 唯一名(pid+序号) |
+| 4 | `62594797` | lazy 无 stale 窗口语义文档化 |
+| 5 | `4c4cb1dc` | 冷/过期 miss single-flight;`enable()`+复查;2 项测试 |
+| 6 | `659dcf15` | 失败后有界重新选举;`single_flight_wait_ms`/`single_flight_max_rounds` 配置化与校验;指标文档与 WebUI schema/本地化 |
+| 7 | `e23a1870` | ecs_handler 请求侧剥离——`forward=false` 时 post-stage 同时移除请求 ECS;与 #1 语义配套 |
 
-按表序;#2 依赖 #1 的同文件上下文。
+按表序;#5 依赖 #1 的同文件上下文;#6 依赖 #5。
+
+分支 `fork/fix/cache-hardening` 上相对 release 的 diff 为 9 个提交:7 系列 + `bc838851`(`62594797` 之后附加的缓存文档说明,自 `7e2d66c2` 拆出)+ `ea831344`(nightly fmt 绕行)+ 1 个 release 合并。按文档顺序 cherry-pick 时,先取 1–6,`e23a1870` 与 #1 配套、单独引入;两个配套提交均不带额外行为。
+
+验证(分支最终态):`cargo check --locked --all-targets --all-features` 干净;聚焦 `ecs_handler` 9/9 通过;`fmt` 干净;分支此前一次全量 1368 项通过。
+
+## 系列 4:上游与协议健壮性(7 提交)— 未建 PR
+
+PR 标题:`fix(upstream): bound responses, async resolution, and unpredictable IDs`
+
+| # | 提交 | 内容 |
+|---|---|---|
+| 1 | `4db4f6a0` | 系统 DNS 解析移入 `spawn_blocking`;deadline 可取消 |
+| 2 | `d08d26e7` | 上游 DoH/H2/H3 响应体 64KiB 硬上限 |
+| 3 | `21ff3d0c` | bootstrap 查询改 `load_full` |
+| 4 | `fc424339` | 上游事务 ID 随机起点 + 奇数步长 |
+| 5 | `1f828545` | style:rustfmt 十六进制字面量(#4 的格式尾随) |
+| 6 | `202a8403` | 压缩指针环检测 O(n²)→O(1),强制前指 |
+| 7 | `71d699d8` | probe 阻塞操作走有界阻塞池 |
+
+按表序;#4+#5 可合并;#6 在 `crates/proto`,可单独成 PR。
+
+## 系列 5:平台与升级(3 提交)— 未建 PR
+
+PR 标题:`fix(service,upgrade): graceful SCM stop and upgrade hardening`
+
+| # | 提交 | 内容 |
+|---|---|---|
+| 1 | `0145cf63` | Windows SCM Stop 优雅关停(oneshot 排水,≤20s) |
+| 2 | `d10edfa7` | 服务错误路径 exit(1) |
+| 3 | `2c026e91` | 下载总超时 30s→300s;回滚失败改 error 日志 |
+
+按表序;#2 依赖 #1。
 
 ---
 
 ## 汇总
 
-| 系列 | 提交数 | 风险 | 建议 |
-|---|---|---|---|
-| 1 API 加固 | 3 | 低 | 可立即发 PR |
-| 2 DNS 服务加固 | 8 | 低 | 可立即发 PR |
-| 3 缓存正确性与性能 | 6 | 低(P0 修复建议优先评审)| 可立即发 PR,建议标注 P0 |
-| 4 上游与协议健壮性 | 7 | 低(#1/#2 触及建连热路径)| 可立即发 PR |
-| 5 平台与升级 | 3 | 中(Windows 生命周期行为)| 建议 Windows 环境实测后发 |
-| 共享 lint | `87cad1b2` | 无 | 随最后合并的系列携带 |
-| semaphore-pools | 5 | 中 | 见 `pr-series-semaphore-pools.md` |
-| staged-reload | 3 | 中 | 见 `pr-series-staged-reload.md`,建议最后合并 |
+| 项 | 提交数 | 状态 |
+|---|---|---|
+| 系列 1 API 加固 | 3 | ✅ 已合入 release/v1.7.0(#401) |
+| 系列 2 DNS 服务加固 | 8 | ✅ 已合入(#402) |
+| 系列 3 缓存正确性与性能 | 7 | PR 分支已推送,**未建 PR**;建议标注 P0 |
+| 系列 4 上游与协议健壮性 | 7 | 未建 PR;#1/#2 触及建连热路径 |
+| 系列 5 平台与升级 | 3 | 未建 PR;建议 Windows 环境实测 |
+| 共享 lint `87cad1b2` | 1 | 未携带;随最后合并的系列或手拆 |
+| semaphore-pools | 5 | 未建 PR;见 `pr-series-semaphore-pools.md`(6 提交含应急 `3f14471d`) |
+| staged-reload | 5 | 未建 PR;见 `pr-series-staged-reload.md`(3 个 PR) |
+| 其他清理(`0e43f157`、`31f20124`、`b1d81777`) | 3 | 未归组,可随 staged-reload 或弃 |
+| 已撤销 disable_ecs(`fc15334e` + `3122c1af`) | 2 | net-zero,不进任何上游 PR |
+| 文档/学习笔记/PR 正文等(分支元数据) | 34 | 不进上游 PR |
+| 合并 `origin/main`(`488237ff`) | 1 | — |
+| **合计** | **79** | 五个修复系列 28 + 共享 lint 1 + 重构系列 10 + 清理未归组/已撤销 5 + 元数据/合并 35 |
 
-分支总提交 41 = 五个修复系列 27 + 共享 lint 1 + semaphore 5 + staged-reload 3 + 分支元数据 5。
+> 设计文档本身(`design-*.md`)可随对应系列携带,也可不带。
