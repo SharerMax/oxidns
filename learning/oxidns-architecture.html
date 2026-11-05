@@ -1692,7 +1692,7 @@ html&gt;body{padding:0}&lt;/style&gt;
 
   &lt;div&gt;
     &lt;h1&gt;OxiDNS 代码架构解析&lt;/h1&gt;
-    &lt;p class=&quot;oa-sub&quot;&gt;v1.6.1 · Rust + Tokio 多线程运行时 · 插件驱动的高性能 DNS 服务器 · src/ 下 291 个 Rust 源文件 · 5 个 workspace crate&lt;/p&gt;
+    &lt;p class=&quot;oa-sub&quot;&gt;v1.6.1 基线(release/v1.7.0 开发线) · 2026-11-05 更新 · Rust + Tokio 多线程运行时 · 插件驱动的高性能 DNS 服务器 · src/ 下 291 个 Rust 源文件 · 5 个 workspace crate&lt;/p&gt;
   &lt;/div&gt;
 
   &lt;div class=&quot;nav nav-pills&quot; role=&quot;tablist&quot; aria-label=&quot;架构文档章节&quot;&gt;
@@ -2019,7 +2019,7 @@ html&gt;body{padding:0}&lt;/style&gt;
       &lt;div class=&quot;oa-step&quot;&gt;&lt;div class=&quot;oa-num&quot;&gt;11&lt;/div&gt;&lt;div class=&quot;oa-body&quot;&gt;&lt;div class=&quot;t&quot;&gt;出口映射与定稿&lt;/div&gt;&lt;div class=&quot;d&quot;&gt;Err → SERVFAIL;Next 但无响应 → 空 NOERROR;finalize 设 RA=1 并镜像请求 EDNS/DO 位(request.rs:69-151)&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;
       &lt;div class=&quot;oa-step&quot;&gt;&lt;div class=&quot;oa-num&quot;&gt;12&lt;/div&gt;&lt;div class=&quot;oa-body&quot;&gt;&lt;div class=&quot;t&quot;&gt;编码回发&lt;/div&gt;&lt;div class=&quot;d&quot;&gt;UDP 按请求方 EDNS max_payload 截断(置 TC=1 而非字节截断);TCP/DoT 长度前缀 + 每连接 mpsc 写者;DoH 按 RFC 8484(GET ?dns= / POST);DoQ 每双向流一查询&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;
     &lt;/div&gt;
-    &lt;p class=&quot;oa-note text-small&quot;&gt;lazy 缓存:过期后仍可回 stale 应答(剩余 TTL 取 min(lazy_cache_ttl, ttl)),并经去重集合触发后台刷新(5s 超时,子上下文复用);采样 LRU 以 95%/85% 水位淘汰;可选 dump_file 持久化(600s 间隔,变更 ≥1024 才落盘)。&lt;/p&gt;
+    &lt;p class=&quot;oa-note text-small&quot;&gt;lazy 缓存:过期后仍可回 stale 应答(剩余 TTL 取 min(lazy_cache_ttl, ttl)),并经去重集合触发后台刷新(5s 超时,子上下文复用);冷/过期未命中另有 single-flight(首个 miss 取数,同 key 等待者有界等待;leader 失败重新选举,轮次耗尽后自行取数),等待窗口与轮次可配 &lt;code&gt;single_flight_wait_ms&lt;/code&gt; / &lt;code&gt;single_flight_max_rounds&lt;/code&gt;;采样 LRU 以 95%/85% 水位淘汰;可选 dump_file 持久化(600s 间隔,变更 ≥1024 才落盘)。&lt;/p&gt;
 
     &lt;h3&gt;&lt;i data-lucide=&quot;refresh-cw&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;配置热重载&lt;/h3&gt;
     &lt;svg class=&quot;oa-svg&quot; viewBox=&quot;0 0 740 440&quot; role=&quot;img&quot; aria-label=&quot;配置热重载流程图:防并发拒绝、候选校验失败不动运行、Unix 候选离线构建后提交交换与排水、提交失败回滚旧配置、回滚失败进程退出&quot;&gt;
@@ -2500,12 +2500,12 @@ html&gt;body{padding:0}&lt;/style&gt;
   &lt;!-- ==================== 代码评审 ==================== --&gt;
   &lt;div id=&quot;oa-panel-review&quot; role=&quot;tabpanel&quot; aria-labelledby=&quot;oa-tab-review&quot; hidden&gt;
     &lt;h2&gt;评审概要&lt;/h2&gt;
-    &lt;p class=&quot;oa-sub&quot;&gt;方法:四个方向并行深读(服务器与 DNS 核心 / 执行器链与缓存 / 网络基础设施 / 生命周期与 API·配置),全部结论带 file:line 证据;P0 与 P1 结论逐条人工复核过源码。基线:v1.6.1(bd183f69),纯静态审查。&lt;strong&gt;修复进展&lt;/strong&gt;:已在分支 &lt;code&gt;fix/code-review-priorities&lt;/code&gt; 按优先级修复 24 项,并对重载系列追加 2 项回归与告警修复;分支自 v1.6.1 起累计 49 个提交(37 项代码与工程改动 + 12 项文档),fmt/clippy 全 bundle 通过,1322 项既有测试全绿,新增 2 项路由用例经定向验证后交由 CI 复核全量。其余 11 项缓议并在下表注明原因;提交号为该分支短哈希。&lt;/p&gt;
+    &lt;p class=&quot;oa-sub&quot;&gt;方法:四个方向并行深读(服务器与 DNS 核心 / 执行器链与缓存 / 网络基础设施 / 生命周期与 API·配置),全部结论带 file:line 证据;P0 与 P1 结论逐条人工复核过源码。基线:v1.6.1(bd183f69),纯静态审查。&lt;strong&gt;修复进展&lt;/strong&gt;:评审问题已修复 24 项(P0×2 · P1×5 · P2×4 · P3×13),其余 11 项缓议并在下表注明原因;分支 &lt;code&gt;fix/code-review-priorities&lt;/code&gt; 自 v1.6.1 起累计 90 个提交(87 个非合并:49 项代码与工程改动 + 38 项文档与学习笔记),fmt/clippy 全 bundle 通过。按子系统拆分后,系列 1(PR #401)与系列 2(PR #402)已合入 &lt;code&gt;release/v1.7.0&lt;/code&gt;,上游 #412 补齐 opcode/DoQ 关停;系列 3 的 PR 分支 &lt;code&gt;fix/cache-hardening&lt;/code&gt; 已推送(10 个提交),全量 1369 项通过 / 3 项基准 ignored,待建 PR;系列 4–7 尚未建 PR。提交号为对应分支短哈希。&lt;/p&gt;
     &lt;div class=&quot;viz-grid&quot;&gt;
       &lt;div class=&quot;card viz-stat&quot;&gt;&lt;div class=&quot;text-small text-muted&quot;&gt;已修复&lt;/div&gt;&lt;div class=&quot;viz-stat-value&quot;&gt;24&lt;/div&gt;&lt;div class=&quot;text-small text-muted&quot;&gt;P0×2 · P1×5 · P2×4 · P3×13&lt;/div&gt;&lt;/div&gt;
       &lt;div class=&quot;card viz-stat&quot;&gt;&lt;div class=&quot;text-small text-muted&quot;&gt;缓议&lt;/div&gt;&lt;div class=&quot;viz-stat-value&quot;&gt;11&lt;/div&gt;&lt;div class=&quot;text-small text-muted&quot;&gt;P2×6 · P3×5,均注明原因&lt;/div&gt;&lt;/div&gt;
       &lt;div class=&quot;card viz-stat&quot;&gt;&lt;div class=&quot;text-small text-muted&quot;&gt;优化方向&lt;/div&gt;&lt;div class=&quot;viz-stat-value&quot;&gt;5&lt;/div&gt;&lt;div class=&quot;text-small text-muted&quot;&gt;保留为后续方向&lt;/div&gt;&lt;/div&gt;
-      &lt;div class=&quot;card viz-stat&quot;&gt;&lt;div class=&quot;text-small text-muted&quot;&gt;修复分支提交&lt;/div&gt;&lt;div class=&quot;viz-stat-value&quot;&gt;49&lt;/div&gt;&lt;div class=&quot;text-small text-muted&quot;&gt;37 代码/工程 + 12 文档&lt;/div&gt;&lt;/div&gt;
+      &lt;div class=&quot;card viz-stat&quot;&gt;&lt;div class=&quot;text-small text-muted&quot;&gt;分支提交(v1.6.1 起)&lt;/div&gt;&lt;div class=&quot;viz-stat-value&quot;&gt;90&lt;/div&gt;&lt;div class=&quot;text-small text-muted&quot;&gt;87 非合并:49 代码/工程 + 38 文档/笔记&lt;/div&gt;&lt;/div&gt;
     &lt;/div&gt;
 
     &lt;h2&gt;&lt;span class=&quot;viz-badge&quot;&gt;P0&lt;/span&gt; 立即修复(已全部修复)&lt;/h2&gt;
@@ -2518,12 +2518,12 @@ html&gt;body{padding:0}&lt;/style&gt;
       &lt;li&gt;&lt;strong&gt;修复&lt;/strong&gt;:加 1–4MiB 上限返回 413,复用 DoH 侧 &lt;code&gt;read_hyper_body&lt;/code&gt; 模式&lt;/li&gt;
     &lt;/ul&gt;
 
-    &lt;h3&gt;2. ECS 跨客户端缓存污染(cache 前算 key,链后注入 ECS)&lt;span class=&quot;viz-badge&quot;&gt;已修复 cc079fc7&lt;/span&gt;&lt;/h3&gt;
+    &lt;h3&gt;2. ECS 跨客户端缓存污染(cache 前算 key,链后注入 ECS)&lt;span class=&quot;viz-badge&quot;&gt;已修复 cc079fc7 + e23a1870&lt;/span&gt;&lt;/h3&gt;
     &lt;ul&gt;
       &lt;li&gt;&lt;strong&gt;证据&lt;/strong&gt;:&lt;code&gt;cache/key.rs:114-138&lt;/code&gt; 在链执行前用当时请求算 key;&lt;code&gt;cache/mod.rs:1408-1434&lt;/code&gt; 的 insert 校验只比对 qname/qtype/qclass,不看 ECS;&lt;code&gt;ecs_handler.rs:105-142&lt;/code&gt; 在下游为请求注入合成 ECS&lt;/li&gt;
       &lt;li&gt;&lt;strong&gt;机制&lt;/strong&gt;:&lt;code&gt;cache → ecs_handler(send: true) → forward&lt;/code&gt;(自然写法)下,客户 A(1.2.3.4)未命中 → 上游返回子网相关地理答案 → 以 &lt;code&gt;ecs_scope: None&lt;/code&gt; 的全局 key 入缓存 → 客户 B(5.6.7.8)直接命中 A 的答案&lt;/li&gt;
       &lt;li&gt;&lt;strong&gt;注意&lt;/strong&gt;:&lt;code&gt;ecs_in_key: true&lt;/code&gt; 救不了该顺序——它只对客户端自带 ECS 生效;此组合无测试覆盖,文档也没有位置警告&lt;/li&gt;
-      &lt;li&gt;&lt;strong&gt;修复&lt;/strong&gt;:insert 时按&lt;strong&gt;当下&lt;/strong&gt;请求重算/校验 key(此时可能已注入 ECS),不一致则拒缓存;或响应携带非零 scope 的 ECS 时跳过缓存&lt;/li&gt;
+      &lt;li&gt;&lt;strong&gt;修复&lt;/strong&gt;:insert 与 lazy 刷新按&lt;strong&gt;当下&lt;/strong&gt;请求重算/校验 key(此时可能已注入 ECS),不一致、或 key 未带 scope 而响应回显非零 scope 时拒缓存并计数 &lt;code&gt;ecs_scope_mismatch&lt;/code&gt;;&lt;code&gt;ecs_handler&lt;/code&gt; 在 &lt;code&gt;forward=false&lt;/code&gt; 时于链后同步剥离请求 ECS,避免污染后续指令与日志&lt;/li&gt;
     &lt;/ul&gt;
 
     &lt;h2&gt;&lt;span class=&quot;viz-badge&quot;&gt;P1&lt;/span&gt; 高优先级(已全部修复)&lt;/h2&gt;
@@ -2586,27 +2586,30 @@ html&gt;body{padding:0}&lt;/style&gt;
     &lt;/ul&gt;
 
     &lt;h2&gt;设计与实施(重构系列)&lt;/h2&gt;
-    &lt;p class=&quot;oa-sub&quot;&gt;评审修复与两个架构级优化已全部实施并推送分支 &lt;code&gt;fix/code-review-priorities&lt;/code&gt;(49 个提交:37 项代码与工程改动 + 12 项文档;1322 项既有测试全绿,新增用例定向验证后由 CI 复核全量)。全部提交按子系统拆为七个可独立评审的 PR 系列,拆分方案、cherry-pick 序列与 PR 描述要点见 &lt;code&gt;pr-doc/&lt;/code&gt; 目录:&lt;code&gt;pr-series-review-fixes.md&lt;/code&gt;(五个修复系列)、&lt;code&gt;pr-series-staged-reload.md&lt;/code&gt;、&lt;code&gt;pr-series-semaphore-pools.md&lt;/code&gt;。&lt;/p&gt;
+    &lt;p class=&quot;oa-sub&quot;&gt;评审修复与两个架构级优化已全部实施并推送分支 &lt;code&gt;fix/code-review-priorities&lt;/code&gt;(90 个提交:87 个非合并,49 项代码与工程改动 + 38 项文档与学习笔记;fmt/clippy 全 bundle 通过)。全部提交按子系统拆为七个可独立评审的 PR 系列,拆分方案、cherry-pick 序列与 PR 描述要点见 &lt;code&gt;pr-doc/&lt;/code&gt; 目录:&lt;code&gt;pr-series-review-fixes.md&lt;/code&gt;(五个修复系列)、&lt;code&gt;pr-series-staged-reload.md&lt;/code&gt;、&lt;code&gt;pr-series-semaphore-pools.md&lt;/code&gt;。现状:系列 1/2 已合入 &lt;code&gt;release/v1.7.0&lt;/code&gt;(#401/#402);系列 3 分支已推送并通过全量 1369 项(3 项基准 ignored),建议标注 P0,待建 PR;系列 4–7 待发。&lt;/p&gt;
     &lt;div class=&quot;table-responsive&quot;&gt;
       &lt;table class=&quot;table table-sm&quot;&gt;
-        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;系列&lt;/th&gt;&lt;th&gt;提交&lt;/th&gt;&lt;th&gt;核心内容&lt;/th&gt;&lt;th&gt;风险&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+        &lt;thead&gt;&lt;tr&gt;&lt;th&gt;系列&lt;/th&gt;&lt;th style=&quot;white-space:nowrap&quot;&gt;提交&lt;/th&gt;&lt;th&gt;核心内容&lt;/th&gt;&lt;th style=&quot;white-space:nowrap&quot;&gt;状态&lt;/th&gt;&lt;th style=&quot;white-space:nowrap&quot;&gt;风险&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
         &lt;tbody&gt;
-          &lt;tr&gt;&lt;td&gt;1 管理 API 加固&lt;/td&gt;&lt;td&gt;3&lt;/td&gt;&lt;td&gt;请求体上限(鉴权前 OOM)· 恒时 auth 比较 · 配置保存原子化&lt;/td&gt;&lt;td&gt;低&lt;/td&gt;&lt;/tr&gt;
-          &lt;tr&gt;&lt;td&gt;2 DNS 服务加固&lt;/td&gt;&lt;td&gt;8&lt;/td&gt;&lt;td&gt;QR/opcode 预检(+任务前移)· BADVERS · TCP 帧/keepalive · DoQ 排水 · 日志降级 · fallback threshold&lt;/td&gt;&lt;td&gt;低&lt;/td&gt;&lt;/tr&gt;
-          &lt;tr&gt;&lt;td&gt;3 缓存正确性与性能&lt;/td&gt;&lt;td&gt;5&lt;/td&gt;&lt;td&gt;&lt;strong&gt;P0&lt;/strong&gt; ECS 跨客户端污染修复 · single-flight · 采样 LRU 轮转 · dump 加固&lt;/td&gt;&lt;td&gt;低&lt;/td&gt;&lt;/tr&gt;
-          &lt;tr&gt;&lt;td&gt;4 上游与协议健壮性&lt;/td&gt;&lt;td&gt;7&lt;/td&gt;&lt;td&gt;DoH 响应体上限 · 阻塞解析出 worker · 随机事务 ID · 指针环 O(1)&lt;/td&gt;&lt;td&gt;低&lt;/td&gt;&lt;/tr&gt;
-          &lt;tr&gt;&lt;td&gt;5 平台与升级&lt;/td&gt;&lt;td&gt;3&lt;/td&gt;&lt;td&gt;Windows SCM 优雅关停 · 错误退出码 · 升级超时/回滚日志&lt;/td&gt;&lt;td&gt;中&lt;/td&gt;&lt;/tr&gt;
-          &lt;tr&gt;&lt;td&gt;6 Semaphore Pools(重构)&lt;/td&gt;&lt;td&gt;5&lt;/td&gt;&lt;td&gt;ReusePool/PipelinePool 迁移 Semaphore;两池零手写 notify;churn 基准护栏&lt;/td&gt;&lt;td&gt;中&lt;/td&gt;&lt;/tr&gt;
-          &lt;tr&gt;&lt;td&gt;7 Staged Reload(重构)&lt;/td&gt;&lt;td&gt;5&lt;/td&gt;&lt;td&gt;Unix 重载零拒连、坏配置零回滚;指标分代;/reload/status 带 phase;插件路由进候选 hub;非 Unix 回退仅条件编译&lt;/td&gt;&lt;td&gt;中&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;1 管理 API 加固&lt;/td&gt;&lt;td&gt;3&lt;/td&gt;&lt;td&gt;请求体上限(鉴权前 OOM)· 恒时 auth 比较 · 配置保存原子化&lt;/td&gt;&lt;td style=&quot;white-space:nowrap&quot;&gt;已合入 #401&lt;/td&gt;&lt;td&gt;低&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;2 DNS 服务加固&lt;/td&gt;&lt;td&gt;8&lt;/td&gt;&lt;td&gt;QR/opcode 预检(+任务前移)· BADVERS · TCP 帧/keepalive · DoQ 排水 · 日志降级 · fallback threshold&lt;/td&gt;&lt;td style=&quot;white-space:nowrap&quot;&gt;已合入 #402&lt;/td&gt;&lt;td&gt;低&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;3 缓存正确性与性能&lt;/td&gt;&lt;td&gt;7&lt;/td&gt;&lt;td&gt;&lt;strong&gt;P0&lt;/strong&gt; ECS 跨客户端污染修复(insert/lazy 校验 + 请求侧剥离)· single-flight(含重新选举)· 采样 LRU 轮转 · dump 加固 · stale 语义文档&lt;/td&gt;&lt;td style=&quot;white-space:nowrap&quot;&gt;待建 PR&lt;/td&gt;&lt;td&gt;低&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;4 上游与协议健壮性&lt;/td&gt;&lt;td&gt;7&lt;/td&gt;&lt;td&gt;DoH 响应体上限 · 阻塞解析出 worker · 随机事务 ID · 指针环 O(1)&lt;/td&gt;&lt;td style=&quot;white-space:nowrap&quot;&gt;未建 PR&lt;/td&gt;&lt;td&gt;低&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;5 平台与升级&lt;/td&gt;&lt;td&gt;3&lt;/td&gt;&lt;td&gt;Windows SCM 优雅关停 · 错误退出码 · 升级超时/回滚日志&lt;/td&gt;&lt;td style=&quot;white-space:nowrap&quot;&gt;未建 PR&lt;/td&gt;&lt;td&gt;中&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;6 Semaphore Pools(重构)&lt;/td&gt;&lt;td&gt;6&lt;/td&gt;&lt;td&gt;ReusePool/PipelinePool 迁移 Semaphore;两池零手写 notify;churn 基准护栏;含应急唤醒修复 3f14471d&lt;/td&gt;&lt;td style=&quot;white-space:nowrap&quot;&gt;未建 PR&lt;/td&gt;&lt;td&gt;中&lt;/td&gt;&lt;/tr&gt;
+          &lt;tr&gt;&lt;td&gt;7 Staged Reload(重构)&lt;/td&gt;&lt;td&gt;5&lt;/td&gt;&lt;td&gt;Unix 重载零拒连、坏配置零回滚;指标分代;/reload/status 带 phase;插件路由进候选 hub;非 Unix 回退仅条件编译&lt;/td&gt;&lt;td style=&quot;white-space:nowrap&quot;&gt;未建 PR&lt;/td&gt;&lt;td&gt;中&lt;/td&gt;&lt;/tr&gt;
         &lt;/tbody&gt;
       &lt;/table&gt;
     &lt;/div&gt;
-    &lt;p class=&quot;oa-note text-small&quot;&gt;另有共享 lint 提交 87cad1b2(横跨系列 1/4/5 的文件,须在其依赖的提交之后携带);4 个分支元数据提交(设计文档状态与系列拆分文档)不进上游。建议合并顺序:系列 1–5(互相独立)→ 6(semaphore)→ 7(staged-reload)。&lt;/p&gt;
+    &lt;p class=&quot;oa-note text-small&quot;&gt;另有共享 lint 提交 87cad1b2(横跨系列 1/4/5 的文件,须在其依赖的提交之后携带);34 个分支元数据提交(设计文档状态、系列拆分与学习笔记)不进上游。当前合并顺序:系列 3(P0,先发)→ 系列 4/5 → 6(semaphore,需 3f14471d 上下文)→ 7(staged-reload,体量最大)。&lt;/p&gt;
     &lt;p class=&quot;oa-note text-small&quot;&gt;系列 7 的两个追加修复:&lt;code&gt;cd9881f4&lt;/code&gt; 在 &lt;code&gt;stage_runtime&lt;/code&gt; 之前安装候选 API hub,使插件 &lt;code&gt;init()&lt;/code&gt; 期的 scoped route 进入候选 hub(staging 失败时恢复旧 register),staged reload 后 &lt;code&gt;/api/plugins/&amp;lt;tag&amp;gt;/*&lt;/code&gt; 不再 404;&lt;code&gt;03ac4154&lt;/code&gt; 用 &lt;code&gt;#[cfg(not(unix))]&lt;/code&gt; 把 stop-the-world 回退限定到非 Unix 构建,消除 aarch64-musl 构建的 &lt;code&gt;unreachable statement&lt;/code&gt; 告警,Unix 运行时行为不变。&lt;/p&gt;
     &lt;p class=&quot;oa-note text-small&quot;&gt;发布验证:&lt;code&gt;aarch64-unknown-linux-musl&lt;/code&gt; release 二进制已在 &lt;code&gt;0e4c67a9&lt;/code&gt; 重建,编译告警消失;UPX 4.2.2 &lt;code&gt;-9 --lzma&lt;/code&gt; 压缩后 10.94 MB → 3.97 MB(36.3%),&lt;code&gt;upx -t&lt;/code&gt; 自检通过;环境中无 qemu,压缩产物未做运行验证。&lt;/p&gt;
 
     &lt;h2&gt;已验证无问题的方面&lt;/h2&gt;
     &lt;p class=&quot;oa-sub&quot;&gt;解压缩炸弹防护(指针环/255 字节/指针数上限齐全)、缓存 TTL 与 RFC 2308 负缓存语义、dump 加载校验、JoinSet 取消安全(v1.6.1 后池状态机与 Drop 路径经交叉验证一致)、include 环与 env 展开安全、静态文件路径穿越防护、升级 sha256 强制校验与 zip-slip 防护、TCP 两阶段排水、exec_restart 参数保真、QueryDeadline 单调预算、TaskCenter 调度与停止顺序、Windows udp_socket(近两次修复后)——这些常见雷区均已正确处理。&lt;/p&gt;
+
+    &lt;h2&gt;已知缺口&lt;/h2&gt;
+    &lt;p class=&quot;oa-sub&quot;&gt;&lt;strong&gt;ISSUE-001 消息编解码失去第三方差分校验&lt;/strong&gt;:上游 &lt;code&gt;38ce2436&lt;/code&gt; 删除了 &lt;code&gt;message_hickory_compat.rs&lt;/code&gt; 与 &lt;code&gt;hickory-proto&lt;/code&gt; dev 依赖,当前 &lt;code&gt;oxidns-proto&lt;/code&gt; 的 wire 测试全部是编码器/解码器自洽回环,无法发现对称性错误(名字压缩、EDNS 字段语义、截断边界、SVCB 参数顺序等)。建议用外部实现生成的原始字节 fixture 补单向或双向校验,详见 &lt;code&gt;learning/issues.md&lt;/code&gt; 的 ISSUE-001;在补齐前,涉及 &lt;code&gt;crates/proto&lt;/code&gt; 编解码的改动应按跨实现兼容性风险对待。&lt;/p&gt;
   &lt;/div&gt;
 &lt;/div&gt;
 
