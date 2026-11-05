@@ -448,6 +448,13 @@ import PluginAvailability from "@site/src/components/PluginAvailability";
 
 - 类型：`boolean`；必填：否；默认值：`false`
 - 作用：控制 ECS scope 是否参与缓存键计算。
+- 键构成：缓存键包含域名、QTYPE、QCLASS、DO、CD 位；开启本项后额外加入请求当前 ECS 的 scope 摘要（地址族、source/scope prefix 与按 source prefix 截断的网段）。
+- 写入校验：缓存键在进入 cache 时即已计算，而写缓存发生在整个下游链（含各执行器回程）结束之后。写入前会重新校验请求当前的 ECS 与键一致，且无 ECS 的键不会保存回显非零 scope ECS 的响应；不满足时跳过写入，以 `cache_skip_total{reason="ecs_scope_mismatch"}` 计数。lazy cache 后台刷新执行同一校验。
+- 与 `ecs_handler` 的位置关系：
+  - `cache` 放在 `ecs_handler` 之后：建键时已能看到透传或注入后的 ECS。开启 `ecs_in_key` 可按子网分片缓存；保持 `false` 时，凡到达 cache 时仍带有 ECS 的请求（透传或注入）都会与无 ECS 键不一致，响应不会写入缓存；而被 `forward: false` 剥除客户端 ECS 后到达 cache 的请求可按全局键正常缓存。
+  - `cache` 放在 `ecs_handler` 之前、客户端自带 ECS 且 `forward: true`：`ecs_in_key: false` 时带 ECS 的请求会全部因 `ecs_scope_mismatch` 跳过；`ecs_in_key: true` 时按客户端子网分片缓存。
+  - `cache` 放在 `ecs_handler` 之前、客户端自带 ECS 且 `forward: false`：上游查询的是剥除 ECS 后的全局答案。`ecs_in_key: false` 时可正常按全局键缓存；`ecs_in_key: true` 时键中保留了建键时的客户端 ECS，与写入时“请求已无 ECS”不一致，带 ECS 的请求会被跳过。
+  - 风险组合：`cache` 放在按客户端注入子网的 `ecs_handler`（`send: true`）之前时，`ecs_handler` 回程会清除请求与响应中的 ECS，写入校验看到的是两侧均无 ECS，无法识别答案实际按首个取数客户端的子网计算，该答案会以全局键写入并可能被其他子网的客户端命中，且此场景不会产生 `ecs_scope_mismatch` 计数。需要注入 ECS 时，应把 `cache` 放在该 `ecs_handler` 之后并开启 `ecs_in_key`。
 
 ### quick setup
 
@@ -464,6 +471,7 @@ import PluginAvailability from "@site/src/components/PluginAvailability";
 
 ### 行为说明
 
+- 写缓存（含 lazy cache 后台刷新）前会校验缓存键与当前请求的一致性：响应 Question 需与键匹配，请求当前 ECS scope 需与建键时一致，且无 ECS 的键不接受回显非零 scope ECS 的响应；不一致时跳过写入（`ecs_scope_mismatch`），详见 `ecs_in_key`。
 - 既会读缓存，也会在后续拿到响应后写缓存。
 - 命中缓存时，返回缓存副本并按剩余 TTL 输出。
 - 内置过期清理和近似 LRU 回收。
@@ -490,7 +498,7 @@ import PluginAvailability from "@site/src/components/PluginAvailability";
 - `cache_miss_total`
 - `cache_expired_total`
 - `cache_insert_total`
-- `cache_skip_total{reason="truncated|no_ttl|incomplete_answer|low_positive_ttl"}`
+- `cache_skip_total{reason="truncated|no_ttl|incomplete_answer|low_positive_ttl|ecs_scope_mismatch"}`
 - `cache_lazy_refresh_total{result="started|success|failed"}`
 - `cache_entry_count`
 
