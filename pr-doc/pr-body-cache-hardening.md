@@ -49,7 +49,8 @@ gh pr create \
 ## 测试
 
 - 新增 11 项单测:ECS 3(`test_response_echoes_scoped_ecs`、`ecs_injected_by_downstream_executor_is_not_cached`、`client_supplied_ecs_is_not_cached_under_global_key`),single-flight 2(`concurrent_cold_misses_share_one_downstream_fetch`、`miss_single_flight_follower_falls_back_when_leader_fails`),重新选举与配置校验 4(`miss_single_flight_reelects_one_leader_when_the_first_fails`、`validate_config_rejects_zero_single_flight_wait`、`validate_config_rejects_zero_single_flight_max_rounds`、`single_flight_config_overrides_are_resolved`),ecs_handler 2(随 `44c39246`)。
-- 聚焦测试:`cargo test --lib --all-features ecs_handler` → **9 passed**。该分支最终态未再跑全量(含本系列此前一次全量 1368 passed、WebUI 目标用例 6/6);增量仅为 ecs_handler 的请求侧剥离,无其它发散。
+- 全量 `cargo test --all-features`(分支最终态 `44c39246`,2026-11-05):**1369 passed / 0 failed / 3 ignored**——lib 1257、feature_gating 5、plugin_integration 107;用例执行约 46s,编译 0 warning。3 项 ignored 是 query_recorder 的压测用例(`benchmark_bounded_statistics_filters`、`benchmark_storage_variants`、`benchmark_v2_queue_pressure`),不是失败跳过。
+- 聚焦测试:`cargo test --lib --all-features ecs_handler` → **9 passed**(含 `44c39246` 新增 2 项)。
 - WebUI:`vitest run lib/plugin-definitions-advanced.test.ts lib/i18n/i18n-coverage.audit.test.ts` 6/6 通过。
 - 门禁:`cargo +nightly fmt --all --check` 干净;Windows nightly `cargo +nightly clippy --all-targets --all-features -- -D warnings` 仅剩基线既有的 `src/infra/network/dial.rs:483`,本系列触及文件零告警。
 
