@@ -1,7 +1,7 @@
 # PR:fix(cache): ECS scope validation, single-flight, and persistence hardening
 
 **目标分支**:svenshi/oxidns `release/v1.7.0`
-**来源分支**:SharerMax/oxidns `fix/cache-hardening`(9 个提交 + 1 个 release 合并提交)
+**来源分支**:SharerMax/oxidns `fix/cache-hardening`(11 个提交 + 1 个 release 合并提交)
 **创建命令**:
 
 ```bash
@@ -27,10 +27,12 @@ gh pr create \
 6. **leader 失败后有界重新选举**——waiter 重新注册并参与下一轮选举(共享等待预算,轮次耗尽后自行取数),成功 leader 仍唤醒全部 waiter。新增配置 `single_flight_wait_ms`(默认 5000)与 `single_flight_max_rounds`(默认 3),非零值校验;`cache_single_flight_wait_total` 已补齐指标文档与 WebUI schema/本地化(中/英)。
 7. **fmt**——绕行单行长调用,满足 nightly rustfmt(无语义变化)。
 8. **ecs_handler 请求侧剥离(随本系列挑入)**——`forward=false` 时 post-stage 现在也移除请求里的 ECS,客户端残留或中途合成的子网不再滞留在上下文(mid-chain 行为不变,上游仍看到 prepared request);与 P0 互补——没有它,跨客户端残留 ECS 会一直污染链后半段的请求上下文,P0 的 scope 拒绝逻辑会被动触发。从源分支单独 cherry-pick,不引入其余历史。
+9. **ECS 缓存写入校验文档中/英同步**——补充 insert/lazy 校验与 `ecs_scope_mismatch` 跳过原因的说明,统一中英文参考,纯文档。
+10. **缓存跳过原因 WebUI 本地化**——补齐剩余 `cache` 跳过原因的中/英文案与指标键,仅 WebUI i18n,无 Rust 行为变化。
 
 ## 合入基线
 
-分支已合入 `origin/release/v1.7.0`(`871f8da3`,合并提交 `4a6d62ef`),因此相对目标分支的 diff 仅为下列 9 个提交;该基线已包含管理 API 系列(#401)、DNS 服务加固系列(#402)及上游 `learn_domain`/hosts 标准格式/query-recorder 改版。合并时 9 个与上游重叠的 docs/WebUI 文件自动合并,逐一核对后两侧内容均保留(`single_flight_*` 与上游 `<PluginAvailability>` 注解并存)。
+分支已合入 `origin/release/v1.7.0`(`871f8da3`,合并提交 `4a6d62ef`),因此相对目标分支的 diff 仅为下列 11 个提交;该基线已包含管理 API 系列(#401)、DNS 服务加固系列(#402)及上游 `learn_domain`/hosts 标准格式/query-recorder 改版。合并时 11 个与上游重叠的 docs/WebUI 文件自动合并,逐一核对后两侧内容均保留(`single_flight_*` 与上游 `<PluginAvailability>` 注解并存)。
 
 ## 提交
 
@@ -45,6 +47,8 @@ gh pr create \
 | `d20fa028` | feat(cache): re-elect single-flight leader and make it configurable |
 | `ea831344` | style(cache): wrap long executor chain call to satisfy fmt |
 | `44c39246` | fix(ecs_handler): strip request ECS after downstream when not forwarded |
+| `20f48f70` | docs(plugin): describe cache ECS write validation and sync English reference(纯文档) |
+| `770f51a0` | fix(webui): localize remaining cache skip reasons(WebUI i18n) |
 
 ## 测试
 
