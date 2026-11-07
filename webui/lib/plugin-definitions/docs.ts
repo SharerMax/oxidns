@@ -168,6 +168,13 @@ export const pluginFieldDocs = {
     codes:
       "- 类型：`array`；必填：否；默认值：空数组\n- 作用：定义允许从请求复制到响应中的 EDNS0 option code 集合。\n- 运行影响：\n  - 未配置时插件基本退化为无操作。",
   },
+  drop_edns0opt: {
+    mode: "- 类型：`string`；必填：否；默认值：`blacklist`\n- 取值：`blacklist`、`whitelist`\n- 作用：定义 `codes` 的解释方式。\n- 运行影响：\n  - `blacklist`：移除 `codes` 中列出的 option code，其余保留。\n  - `whitelist`：只保留 `codes` 中列出的 option code，其余全部移除。\n  - 请求侧（可由 `skip_request_strip` 跳过）与响应侧都会按同一模式处理。",
+    skip_request_strip:
+      "- 类型：`boolean`；必填：否；默认值：`false`\n- 作用：控制是否跳过请求侧剥离。\n- 运行影响：\n  - `false`（默认）：请求侧与响应侧都会按 `mode` 处理。\n  - `true`：跳过请求侧剥离，请求完全不变；响应侧仍然处理。\n- 说明：该开关只影响请求侧，响应侧始终处理；插件只增删 option，不会移除 OPT 记录或关闭 EDNS。",
+    codes:
+      "- 类型：`array`；必填：否；默认值：空数组\n- 作用：定义按 `mode` 解释的 EDNS0 option code 集合。\n- 运行影响：\n  - `blacklist`（默认）移除命中 code 的 option；`whitelist` 只保留命中 code 的 option，其余移除。\n  - 请求阶段先处理，随后继续执行后续插件链；响应阶段再对最终响应 OPT 执行同样的处理。\n  - 两侧都只改变命中 code 的 option 取舍，其余 option 的内容与顺序保持不变。\n  - OPT 记录本身、EDNS 版本、flags（含 DO 位）与 UDP payload size 保持不变；即使移除后为空，也保留空 OPT。\n  - 响应没有 OPT 或无需改动时不产生副作用，也不会凭空创建 OPT。\n  - 未配置或无需改动时插件不产生副作用。",
+  },
   ttl: {
     fix: "- 类型：`integer`；必填：否；默认值：无\n- 作用：将所有响应 TTL 固定为同一个值。",
     min: "- 类型：`integer`；必填：否；默认值：无\n- 作用：定义 TTL 下限。",

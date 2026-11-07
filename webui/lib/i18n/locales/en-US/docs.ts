@@ -188,6 +188,13 @@ export const enUSDocs = {
     codes:
       "- Type: `array`; Required: No; Default: empty array\n- Function: Define the set of EDNS0 option codes that are allowed to be copied from the request to the response.\n- Operational impact:\n  - When not configured, the plug-in basically degrades to no operation.",
   },
+  drop_edns0opt: {
+    mode: "- Type: `string`; Required: No; Default: `blacklist`\n- Values: `blacklist`, `whitelist`\n- Function: Define how `codes` is interpreted.\n- Operational impact:\n  - `blacklist`: removes the option codes listed in `codes` and keeps the rest.\n  - `whitelist`: keeps only the option codes listed in `codes` and removes the rest.\n  - Both the request side (which can be skipped with `skip_request_strip`) and the response side use the same mode.",
+    skip_request_strip:
+      "- Type: `boolean`; Required: No; Default: `false`\n- Function: Controls whether request-side stripping is skipped.\n- Operational impact:\n  - `false` (default): both the request and the response are processed according to `mode`.\n  - `true`: request-side stripping is skipped, the request is left untouched, and only the response is processed.\n- Note: the switch only affects the request side; the response side is always processed. The plugin only adds or removes options and never removes the OPT record or disables EDNS.",
+    codes:
+      "- Type: `array`; Required: No; Default: empty array\n- Function: Define the EDNS0 option codes interpreted according to `mode`.\n- Operational impact:\n  - `blacklist` (default): matching options are removed; `whitelist`: only matching options are kept and the rest are removed.\n  - Request phase: applies the mode before the request continues through later executors.\n  - Response phase: applies the same mode to the final response OPT.\n  - Both phases only change the selection of matching options; the remaining options keep their content and order.\n  - The OPT record itself, EDNS version, flags (including DO) and UDP payload size are preserved; an empty OPT is kept after removal.\n  - When the response has no OPT or nothing needs to change, the plugin has no effect and never creates an OPT record.\n  - Without configuration, or when nothing needs to change, the plug-in has no effect.",
+  },
   ttl: {
     fix: "- Type: `integer`; required: no; default value: none\n- Function: Fix all response TTL to the same value.",
     min: "- Type: `integer`; required: no; default value: none\n- Function: Define the TTL lower limit.",

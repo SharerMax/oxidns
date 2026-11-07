@@ -41,6 +41,7 @@ pub mod cron;
 pub mod debug_print;
 #[cfg(feature = "plugin-download")]
 pub mod download;
+pub mod drop_edns0opt;
 pub mod drop_resp;
 pub mod dual_selector;
 pub mod ecs_handler;

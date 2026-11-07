@@ -878,6 +878,41 @@ export const enUSPluginDefined = {
         paramPlaceholder: "10,12",
       },
     },
+    drop_edns0opt: {
+      name: "Drop EDNS0 Opt",
+      description:
+        "Filters EDNS0 option codes in blacklist or whitelist mode; both the request and the response are processed by default",
+      fields: {
+        mode: {
+          label: "Match Mode",
+          description:
+            "Defines how codes is interpreted; blacklist removes the listed codes, whitelist keeps only the listed codes.",
+          example: "blacklist",
+          options: {
+            blacklist: "Blacklist",
+            whitelist: "Whitelist",
+          },
+        },
+        skip_request_strip: {
+          label: "Skip Request-Side Strip",
+          description:
+            "Controls whether request-side stripping is skipped; false (default) filters the request by mode, true leaves the request untouched. The response side is always processed regardless of this field.",
+        },
+        codes: {
+          label: "Option Code",
+          description:
+            "Defines the EDNS0 option codes interpreted according to mode.",
+          example: "10\n12",
+        },
+        "codes[]": {
+          label: "Enter value",
+          example: "10",
+        },
+      },
+      quickSetup: {
+        paramPlaceholder: "10,12",
+      },
+    },
     ttl: {
       name: "TTL",
       description: "Fixed, raised or limited response TTL",

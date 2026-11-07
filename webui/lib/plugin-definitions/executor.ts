@@ -776,6 +776,46 @@ export const executorPluginDefinitions: PluginKindDefinition[] = [
     },
   },
   {
+    kind: "drop_edns0opt",
+    type: "executor",
+    name: "Drop EDNS0 Opt",
+    description:
+      "按黑/白名单模式筛选 EDNS0 option code 后继续处理；默认请求与响应双侧生效",
+    icon: "Ban",
+    configSchema: [
+      {
+        key: "mode",
+        label: "匹配模式",
+        description:
+          "定义 codes 的解释方式；blacklist 移除列出的 code，whitelist 只保留列出的 code。",
+        type: "select",
+        default: "blacklist",
+        options: [
+          { label: "黑名单", value: "blacklist" },
+          { label: "白名单", value: "whitelist" },
+        ],
+      },
+      {
+        key: "skip_request_strip",
+        label: "跳过请求侧剥离",
+        description:
+          "控制是否跳过请求侧剥离；false（默认）时请求侧正常按 mode 处理，true 时请求完全不变。响应侧始终处理，不受该字段影响。",
+        type: "switch",
+        default: false,
+      },
+      stringArrayField(
+        "codes",
+        "Option Code",
+        "10\n12",
+        false,
+        "定义按 mode 解释的 EDNS0 option code 集合。",
+      ),
+    ],
+    quickSetup: {
+      paramPlaceholder: "10,12",
+    },
+  },
+  {
     kind: "ttl",
     type: "executor",
     name: "TTL",

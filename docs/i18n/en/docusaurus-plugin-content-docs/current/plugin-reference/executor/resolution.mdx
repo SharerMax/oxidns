@@ -1056,3 +1056,92 @@ Forwards selected EDNS0 options to upstreams.
 - Preserve specific client-side EDNS signaling needed by upstreams.
 
 ---
+
+## `drop_edns0opt`
+
+### Purpose
+
+Removes or keeps only selected EDNS0 option codes according to `mode`. Both the request and the response are processed by default; with `skip_request_strip: true` the request is skipped and only the response is processed. Processing then continues normally.
+
+### Example Configuration
+
+```yaml
+- tag: edns_strip
+  type: drop_edns0opt
+  args:
+    # blacklist (default): remove listed codes; whitelist: keep only listed codes
+    mode: blacklist
+    # Defaults to false; set to true to skip request-side stripping
+    skip_request_strip: false
+    codes: [10, 12]
+```
+
+### Configuration Details
+
+#### `mode`
+
+- Type: `string`; Required: no; Default: `blacklist`
+- Values: `blacklist`, `whitelist`
+- Purpose: Defines how `codes` is interpreted.
+- Runtime impact:
+  - `blacklist`: removes the option codes listed in `codes` and keeps the rest.
+  - `whitelist`: keeps only the option codes listed in `codes` and removes the rest.
+  - Both the request side (which can be skipped with `skip_request_strip`) and the response side use the same mode; omitting the field keeps the default blacklist behavior.
+
+#### `skip_request_strip`
+
+- Type: `boolean`; Required: no; Default: `false`
+- Purpose: Controls whether request-side stripping is skipped.
+- Runtime impact:
+  - `false` (default): both the request and the response are processed according to `mode`.
+  - `true`: request-side stripping is skipped, the request is left untouched, and only the response is processed.
+- Note: the switch only affects the request side; the response side is always processed regardless of this field.
+
+#### `codes`
+
+- Type: `array`; Required: no; Default: empty array
+- Purpose: Defines the EDNS0 option codes interpreted according to `mode`.
+- Runtime impact:
+  - Request phase: applies the mode before the request continues through later executors.
+  - Response phase: applies the same mode to the final response OPT before it is returned.
+  - Both phases only change the selection of matching options; the remaining options keep their content and order.
+  - The OPT record itself, EDNS version, flags (including DO) and UDP payload size are preserved; an empty OPT is kept after removal.
+  - Without configuration the plugin has no effect.
+
+### quick setup
+
+```yaml
+# Default blacklist mode
+- exec: "drop_edns0opt 10,12"
+# Whitelist mode: keep only 10 and 12
+- exec: "drop_edns0opt whitelist 10,12"
+```
+
+quick setup always uses the default `skip_request_strip: false` (request-side stripping enabled); use the full configuration to skip request-side stripping.
+
+### Behavior
+
+- Request side: with `skip_request_strip: false` (default), applies `mode` to the request OPT before later executors run; with `true` the request is left untouched.
+- Response side: regardless of the switch, after the downstream executor chain completes, applies the same `mode` to the final response OPT and then returns it normally.
+- `blacklist` (default) removes matching options; `whitelist` keeps only matching options and removes the rest.
+- Both sides only change the selection of matching options: neither the request nor the response is discarded, and kept options preserve their content and order.
+- The plugin only adds or removes options and never removes the whole OPT record or disables EDNS. The empty OPT is kept, so the EDNS version, flags, DO bit and UDP payload size survive.
+- In `whitelist` mode an empty `codes` removes every option while still keeping the OPT record; in `blacklist` mode an empty `codes` makes the plugin a no-op.
+- When the request or response has no OPT, or nothing needs to change, the plugin has no effect and never creates an OPT record.
+- Difference from `forward_edns0opt`: `forward_edns0opt` copies selected request options into the final response, while `drop_edns0opt` filters selected options on both sides according to `mode`. Both use the continuation response phase, but the former adds options and the latter removes them.
+
+### RFC 6891 rationale
+
+- The OPT record is a pseudo-record: a message must contain at most one, it may only appear in the Additional section, and its owner name must be the root (`.`); violating these rules should produce `FORMERR` (§6.1.1).
+- Receivers should ignore options they do not understand rather than fail, and responders should only echo options they understand in the response (§6.1.2, §6.2.3).
+- If the request advertises a higher EDNS version than the responder supports, the responder should return `BADVERS` (§6.1.3).
+- The plugin therefore only filters options at the option level and never removes the OPT record or disables EDNS: keeping the OPT record preserves version negotiation, flags, the DO bit, and the UDP payload size, while respecting the "at most one OPT record per message" rule.
+- Request-side stripping is not a protocol requirement but additional gateway normalization, typically for privacy (not forwarding client extensions such as ECS upstream) and cache consistency (avoiding different cache entries for the same question due to differing options). Response-side stripping is likewise a gateway policy, not a protocol mandate.
+
+### Typical Uses
+
+- Strip specific EDNS0 extensions at the entry point so downstream executors and upstreams never see them.
+- Also hide the corresponding options returned by upstreams, such as probes, private extensions, or temporarily unwanted options, while keeping EDNS negotiation intact.
+- Use whitelist mode to allow only a small set of known options through both the request and the response while removing everything else.
+
+---

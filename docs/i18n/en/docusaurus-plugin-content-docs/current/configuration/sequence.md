@@ -143,6 +143,7 @@ Common quick setup forms today:
   - `drop_resp`
   - `ecs_handler ...`
   - `forward_edns0opt ...`
+  - `drop_edns0opt ...`
   - `ipset ...`
   - `nftset ...`
   - `upgrade ...`

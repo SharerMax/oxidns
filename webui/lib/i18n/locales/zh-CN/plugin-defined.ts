@@ -494,7 +494,8 @@ export const zhCNPluginDefined = {
         },
         single_flight_max_rounds: {
           label: "单飞选举轮次上限",
-          description: "leader 失败后重新选举的次数上限，设为 1 可关闭重新选举。",
+          description:
+            "leader 失败后重新选举的次数上限，设为 1 可关闭重新选举。",
         },
       },
       quickSetup: {
@@ -782,6 +783,40 @@ export const zhCNPluginDefined = {
         codes: {
           label: "Option Code",
           description: "定义允许从请求复制到响应中的 EDNS0 option code 集合。",
+          example: "10\n12",
+        },
+        "codes[]": {
+          label: "输入值",
+          example: "10",
+        },
+      },
+      quickSetup: {
+        paramPlaceholder: "10,12",
+      },
+    },
+    drop_edns0opt: {
+      name: "Drop EDNS0 Opt",
+      description:
+        "按黑/白名单模式筛选 EDNS0 option code 后继续处理；默认请求与响应双侧生效",
+      fields: {
+        mode: {
+          label: "匹配模式",
+          description:
+            "定义 codes 的解释方式；blacklist 移除列出的 code，whitelist 只保留列出的 code。",
+          example: "blacklist",
+          options: {
+            blacklist: "黑名单",
+            whitelist: "白名单",
+          },
+        },
+        skip_request_strip: {
+          label: "跳过请求侧剥离",
+          description:
+            "控制是否跳过请求侧剥离；false（默认）时请求侧正常按 mode 处理，true 时请求完全不变。响应侧始终处理，不受该字段影响。",
+        },
+        codes: {
+          label: "Option Code",
+          description: "定义按 mode 解释的 EDNS0 option code 集合。",
           example: "10\n12",
         },
         "codes[]": {

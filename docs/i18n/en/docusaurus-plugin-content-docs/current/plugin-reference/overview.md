@@ -57,6 +57,7 @@ See [Executor Plugins](executor.mdx) for full field reference. Grouped as: polic
 | [`client_ip_from_ecs`](executor/resolution.mdx#client_ip_from_ecs) | Replaces the request-local client IP with the ECS address for subsequent matchers and recorders. |
 | [`ecs_handler`](executor/resolution.mdx#ecs_handler) | Handles EDNS Client Subnet: keep, rewrite, or auto-fill from source IP. |
 | [`forward_edns0opt`](executor/resolution.mdx#forward_edns0opt) | Forwards selected EDNS0 options from the request into the final response. |
+| [`drop_edns0opt`](executor/resolution.mdx#drop_edns0opt) | Filters EDNS0 option codes in blacklist or whitelist mode; both the request and the response are processed by default. |
 
 ### Response rewriting
 

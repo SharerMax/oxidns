@@ -1037,3 +1037,92 @@ ECS 可由请求方伪造。请把 dnsmasq 的真实连接地址或网段明确�
 - 在策略链中保留与下游会话有关的附加元数据。
 
 ---
+
+## `drop_edns0opt`
+
+### 作用
+
+按 `mode` 移除或只保留指定 EDNS0 option code，默认请求与响应两侧都生效；`skip_request_strip: true` 时跳过请求侧、只处理响应侧，然后继续处理。
+
+### 配置示例
+
+```yaml
+- tag: edns_strip
+  type: drop_edns0opt
+  args:
+    # blacklist（默认）：移除列出的 code；whitelist：只保留列出的 code
+    mode: blacklist
+    # 默认 false；设为 true 时跳过请求侧剥离，请求完全不变
+    skip_request_strip: false
+    codes: [10, 12]
+```
+
+### 配置项
+
+#### `mode`
+
+- 类型：`string`；必填：否；默认值：`blacklist`
+- 取值：`blacklist`、`whitelist`
+- 作用：定义 `codes` 的解释方式。
+- 运行影响：
+  - `blacklist`：移除 `codes` 中列出的 option code，其余保留。
+  - `whitelist`：只保留 `codes` 中列出的 option code，其余全部移除。
+  - 请求侧（可由 `skip_request_strip` 跳过）与响应侧都会按同一模式处理；不配置时保持默认黑名单行为。
+
+#### `skip_request_strip`
+
+- 类型：`boolean`；必填：否；默认值：`false`
+- 作用：控制是否跳过请求侧剥离。
+- 运行影响：
+  - `false`（默认）：请求侧与响应侧都会按 `mode` 处理。
+  - `true`：跳过请求侧剥离，请求完全不变；响应侧仍然处理。
+- 说明：该开关只影响请求侧，响应侧始终处理，不受该字段影响。
+
+#### `codes`
+
+- 类型：`array`；必填：否；默认值：空数组
+- 作用：定义按 `mode` 解释的 EDNS0 option code 集合。
+- 运行影响：
+  - 请求阶段先处理，随后请求继续进入后续插件链。
+  - 响应阶段对最终响应 OPT 执行同样的处理，然后正常返回。
+  - 两侧都只改变命中 code 的 option 取舍，其余 option 的内容与顺序保持不变。
+  - OPT 记录本身、EDNS 版本、flags（含 DO 位）与 UDP payload size 保持不变；移除后为空时仍保留空 OPT。
+  - 未配置时插件不生效。
+
+### quick setup
+
+```yaml
+# 默认黑名单模式
+- exec: "drop_edns0opt 10,12"
+# 白名单模式：只保留 10、12
+- exec: "drop_edns0opt whitelist 10,12"
+```
+
+quick setup 始终使用默认 `skip_request_strip: false`（请求侧正常剥离）；需要跳过请求侧时请使用完整配置。
+
+### 行为说明
+
+- 请求侧：`skip_request_strip: false`（默认）时，在进入后续 executor 之前按 `mode` 处理请求 OPT；设为 `true` 时请求完全不变。
+- 响应侧：无论开关如何设置，后续 executor 链完成后都会按同一 `mode` 处理最终响应 OPT，然后正常返回。
+- `blacklist`（默认）移除命中 code 的 option；`whitelist` 只保留命中 code 的 option，其余全部移除。
+- 两侧都只做局部取舍，不丢弃请求或响应，也不改变保留下来的 option 的内容与顺序。
+- 插件只增删 option，绝不会删除整条 OPT 记录或关闭 EDNS；移除后为空时保留空 OPT，以维持 EDNS 版本、flags、DO 位与 UDP payload size。
+- `whitelist` 模式下若 `codes` 为空，会移除全部 option，但仍保留 OPT 记录；`blacklist` 模式下 `codes` 为空则完全不生效。
+- 请求或响应没有 OPT、或无需改动时完全无副作用，也不会为了处理而凭空创建 OPT。
+- 与 `forward_edns0opt` 的差异：`forward_edns0opt` 把请求中的指定 option 复制到最终响应；`drop_edns0opt` 则按 `mode` 在请求与响应两侧筛选指定 option。二者都在 continuation 的响应后处理阶段处理响应，但前者是补充 option，后者是删除 option。
+
+### RFC 6891 依据
+
+- OPT 是伪记录：一条消息最多只能有一条，只能出现在附加（Additional）区，owner name 为根（`.`）；违反这些约束应返回 `FORMERR`（§6.1.1）。
+- 对不认识的 option，接收方应忽略而不是报错；响应方只应在响应中回带自己理解的 option（§6.1.2、§6.2.3）。
+- 请求的 EDNS 版本高于响应方支持的版本时，响应方应返回 `BADVERS`（§6.1.3）。
+- 因此本插件只做 option 级筛选，不删除整条 OPT 记录、也不关闭 EDNS：保留 OPT 才能继续参与版本协商并携带 flags、DO 位与 UDP payload size，同时避免破坏“一条消息最多一条 OPT”的约束。
+- 请求侧剥离不是协议要求，而是网关侧的额外规范化：常见目的是隐私（不把客户端扩展或 ECS 等信息透传给上游）与缓存一致性（避免同一问题因不同 option 命中不同缓存条目）。响应侧剥离同样属于网关策略，而非协议强制。
+
+### 典型用途
+
+- 在入口处剥离特定 EDNS0 扩展，避免下游执行器或上游看到这些 option。
+- 同时避免客户端看到上游返回的对应 option，例如探测类、私有扩展或暂时不需要的 option，并保留 EDNS 协商结果。
+- 使用白名单模式时，只允许少量已知扩展通过请求与响应两侧，其余 option 一律移除。
+
+---

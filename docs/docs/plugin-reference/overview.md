@@ -57,6 +57,7 @@ server -> sequence
 | [`client_ip_from_ecs`](executor/resolution.mdx#client_ip_from_ecs) | 使用请求 ECS 地址覆盖当前请求的客户端 IP，供后续 matcher 与记录器使用。 |
 | [`ecs_handler`](executor/resolution.mdx#ecs_handler) | 处理 EDNS Client Subnet：保留、改写或按来源 IP 自动补齐。 |
 | [`forward_edns0opt`](executor/resolution.mdx#forward_edns0opt) | 把指定 EDNS0 option code 从请求转发到最终响应中。 |
+| [`drop_edns0opt`](executor/resolution.mdx#drop_edns0opt) | 按黑/白名单模式筛选 EDNS0 option code；默认请求与响应双侧生效。 |
 
 ### 响应改写
 

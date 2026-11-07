@@ -143,6 +143,7 @@ title: 执行链与控制流
   - `drop_resp`
   - `ecs_handler ...`
   - `forward_edns0opt ...`
+  - `drop_edns0opt ...`
   - `ipset ...`
   - `nftset ...`
   - `upgrade ...`
