@@ -28,7 +28,8 @@
 //!   removes every option (while keeping the OPT record) in `whitelist` mode.
 //!
 //! Difference from `forward_edns0opt`:
-//! - `forward_edns0opt` copies selected request options into the final response.
+//! - `forward_edns0opt` copies selected request options into the final
+//!   response.
 //! - `drop_edns0opt` removes selected options from both the request and the
 //!   final response, without changing the rest of the DNS exchange.
 
@@ -146,7 +147,7 @@ impl DropEdns0Opt {
                 let kept: Vec<_> = edns
                     .options()
                     .iter()
-                    .filter(|option| self.code_set.contains(&u16::from(EdnsCode::from(*option))))
+                    .filter(|option| self.code_set.contains(&option.code()))
                     .cloned()
                     .collect();
                 if kept.len() == edns.options().len() {

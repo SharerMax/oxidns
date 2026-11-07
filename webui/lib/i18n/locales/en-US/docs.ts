@@ -574,6 +574,13 @@ export const enUSDocs = {
   qclass: {
     args: "`args` of `qclass` is a list of categories.\n\n- Type: `array`; Required: Yes; Default: None\n- Function: Define the set of query categories that are allowed to hit.\n- Supports both enum literals and decimal values, such as `IN` / `CH` / `HS` or `1` / `3` / `4`; both formats can be mixed in the same list.\n- Unknown or future expanded categories can continue to use numeric matching.\n- Operational impact:\n  - Returns `true` if any issue category in the request hits the configuration collection.",
   },
+  edns0opt: {
+    codes:
+      "`codes` is a list of EDNS0 option codes.\n\n- Type: `array`; Required: Yes; Default: None\n- Function: Define the EDNS0 option codes that must be present.\n- Only decimal numeric values (such as `8`, `12`) are supported; no code aliases.\n- Operational impact:\n  - An empty list fails configuration parsing instead of silently producing a matcher that never hits.",
+    require:
+      "- Type: `string`; Required: No; Default: `any`\n- Supported values:\n  - `any`: match when at least one configured code is present\n  - `all`: every configured code must be present\n- Operational impact: only affects how multiple codes are combined.",
+    resp: '- Type: `bool`; Required: No; Default: `false`\n- Function: `false` reads the request OPT; `true` reads the response OPT.\n- Operational impact:\n  - With `resp: true`, returns `false` when the context has no response yet.\n  - When placed in the same sequence as `drop_edns0opt`, ordering changes the result: if `drop_edns0opt` stripped the target option first, this matcher will not match. Request-side stripping is controlled by `skip_request_strip`, while the response side is always processed.\n  - To express "no OPT / no matching option", negate the matcher as a whole; this matcher has no extra switch.',
+  },
   client_ip: {
     args: "The `args` of `client_ip` takes the form of a list of rules.\n\n- Type: `array`; Required: Yes; Default: None\n- Function: Define client source address matching conditions.\n- Support elements:\n  - Single IP\n  - CIDR\n  - `ip_set` reference\n- Operational impact:\n  - As long as the client source address matches any rule, matcher returns `true`.",
   },
