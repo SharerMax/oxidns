@@ -316,8 +316,8 @@ plugins:
                     .unwrap()
                     .option(EdnsCode::Subnet)
                     .is_some(),
-                expected.is_some(),
-                "prepared request ECS must remain available after the chain returns"
+                tag == "seq_forward" && has_client_ecs,
+                "only forwarded client ECS must remain on the request after the chain"
             );
             let response_has_ecs = context
                 .response()
@@ -7162,6 +7162,15 @@ async fn test_edns_filter_upstream_scopes_and_composition() -> Result<()> {
                     .as_mut()
                     .unwrap()
                     .retain_options(|option| expected.contains(&option.code()));
+            }
+            if compose {
+                // The ECS in this case is synthesized by `ecs_handler`; it is
+                // cleared from the request once the chain returns.
+                expected_request
+                    .edns_mut()
+                    .as_mut()
+                    .unwrap()
+                    .retain_options(|option| !matches!(option, EdnsOption::Subnet(_)));
             }
             assert_eq!(context.request, expected_request);
             let response_codes = context

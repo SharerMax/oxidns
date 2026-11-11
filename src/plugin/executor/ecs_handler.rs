@@ -16,8 +16,11 @@
 //! Post-stage behavior:
 //! - response ECS is preserved only when existing client ECS was retained for
 //!   an IN query, avoiding disclosure of internally generated subnet metadata.
-//! - request ECS remains available after execution; this plugin does not
-//!   restore or clear the query when the downstream chain returns.
+//! - an ECS synthesized by this plugin (`send` or `preset`) is removed from the
+//!   request once the downstream chain returns, so internally generated subnet
+//!   metadata does not linger in the context. Client-supplied ECS is never
+//!   removed here: it was either forwarded upstream or already stripped before
+//!   the downstream chain ran.
 
 use std::net::IpAddr;
 
@@ -92,32 +95,49 @@ impl Executor for EcsHandler {
         context: &mut DnsContext,
         next: Option<ExecutorNext>,
     ) -> Result<ExecStep> {
-        let forwarded_client_ecs = self.prepare_request(context)?;
+        let prepared = self.prepare_request(context)?;
         let step = continue_next!(next, context)?;
-        if forwarded_client_ecs {
+        if prepared.forwarded_client_ecs {
             return Ok(step);
         }
 
         if let Some(response) = context.response_mut() {
             strip_ecs_from_message(response);
         }
+        if let Some(synthesized) = prepared.synthesized.as_ref() {
+            strip_synthesized_ecs(context.request_mut(), synthesized);
+        }
         Ok(step)
     }
 }
 
+/// Result of the forward stage.
+struct PreparedEcs {
+    /// Whether the client-supplied ECS was kept for the upstream query.
+    forwarded_client_ecs: bool,
+    /// The ECS this plugin synthesized, if it injected one.
+    synthesized: Option<ClientSubnet>,
+}
+
 impl EcsHandler {
-    fn prepare_request(&self, context: &mut DnsContext) -> Result<bool> {
+    fn prepare_request(&self, context: &mut DnsContext) -> Result<PreparedEcs> {
         let has_ecs = request_has_ecs(&context.request);
         if has_ecs && !self.forward {
             strip_ecs_from_message(context.request_mut());
         }
 
         if context.request.first_qclass() != Some(DNSClass::IN) {
-            return Ok(false);
+            return Ok(PreparedEcs {
+                forwarded_client_ecs: false,
+                synthesized: None,
+            });
         }
 
         if has_ecs && self.forward {
-            return Ok(true);
+            return Ok(PreparedEcs {
+                forwarded_client_ecs: true,
+                synthesized: None,
+            });
         }
 
         let source_ip = if let Some(preset) = self.preset {
@@ -128,17 +148,22 @@ impl EcsHandler {
             None
         };
 
+        let mut synthesized = None;
         if let Some(source_ip) = source_ip {
             let mask = match source_ip {
                 IpAddr::V4(_) => self.mask4,
                 IpAddr::V6(_) => self.mask6,
             };
-            let ecs = EdnsOption::Subnet(ClientSubnet::new(source_ip, mask, 0));
+            let subnet = ClientSubnet::new(source_ip, mask, 0);
             let opt = ensure_opt_record(context.request_mut());
-            opt.insert(ecs);
+            opt.insert(EdnsOption::Subnet(subnet.clone()));
+            synthesized = Some(subnet);
         }
 
-        Ok(false)
+        Ok(PreparedEcs {
+            forwarded_client_ecs: false,
+            synthesized,
+        })
     }
 }
 
@@ -224,15 +249,35 @@ fn parse_handler_from_value(tag: &str, args: Option<Value>) -> Result<EcsHandler
 }
 
 fn request_has_ecs(message: &Message) -> bool {
+    message_ecs(message).is_some()
+}
+
+/// Return the ECS subnet carried by the message, if any.
+fn message_ecs(message: &Message) -> Option<&ClientSubnet> {
     message
         .edns()
         .as_ref()
-        .is_some_and(|edns| matches!(edns.option(EdnsCode::Subnet), Some(EdnsOption::Subnet(_))))
+        .and_then(|edns| edns.option(EdnsCode::Subnet))
+        .and_then(|option| match option {
+            EdnsOption::Subnet(subnet) => Some(subnet),
+            _ => None,
+        })
 }
 
 fn strip_ecs_from_message(message: &mut Message) {
     if let Some(edns) = message.edns_mut() {
         edns.remove(EdnsCode::Subnet);
+    }
+}
+
+/// Remove the request ECS option, but only when it still carries the subnet
+/// this plugin synthesized.
+///
+/// A downstream executor may replace the option; in that case the request
+/// keeps the value that executor installed instead of losing it.
+fn strip_synthesized_ecs(message: &mut Message, synthesized: &ClientSubnet) {
+    if message_ecs(message) == Some(synthesized) {
+        strip_ecs_from_message(message);
     }
 }
 
@@ -243,10 +288,63 @@ fn ensure_opt_record(message: &mut Message) -> &mut Edns {
 #[cfg(test)]
 mod tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::sync::{Arc, Mutex};
 
     use super::*;
     use crate::core::context::DnsContext;
     use crate::proto::{Message, Name, Question, RecordType};
+
+    /// Downstream executor that records the ECS it observed on the request and
+    /// can replace it, so tests can observe mid-chain state and the effect of
+    /// the post-stage cleanup.
+    #[derive(Debug)]
+    struct EcsProbe {
+        observed: Arc<Mutex<Vec<Option<ClientSubnet>>>>,
+        replace_with: Option<ClientSubnet>,
+    }
+
+    #[async_trait]
+    impl Plugin for EcsProbe {
+        fn tag(&self) -> &str {
+            "ecs_probe"
+        }
+
+        async fn init(&mut self, _context: &crate::plugin::PluginInitContext<'_>) -> Result<()> {
+            Ok(())
+        }
+
+        async fn destroy(&self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[async_trait]
+    impl Executor for EcsProbe {
+        async fn execute(&self, context: &mut DnsContext) -> Result<ExecStep> {
+            self.observed
+                .lock()
+                .expect("probe observation poisoned")
+                .push(message_ecs(&context.request).cloned());
+            if let Some(replacement) = &self.replace_with {
+                let opt = ensure_opt_record(context.request_mut());
+                opt.insert(EdnsOption::Subnet(replacement.clone()));
+            }
+            Ok(ExecStep::Next)
+        }
+    }
+
+    fn probe_next(
+        observed: Arc<Mutex<Vec<Option<ClientSubnet>>>>,
+        replace_with: Option<ClientSubnet>,
+    ) -> ExecutorNext {
+        let program = crate::plugin::executor::sequence::chain::ChainProgram::single_with_next_executor_for_test(
+            Arc::new(EcsProbe {
+                observed,
+                replace_with,
+            }),
+        );
+        ExecutorNext::new(program, 0)
+    }
 
     #[test]
     fn test_parse_handler_from_value_validation() {
@@ -304,9 +402,9 @@ mod tests {
                                 ensure_opt_record(ctx.request_mut())
                                     .insert(EdnsOption::Subnet(client_ecs.clone()));
                             }
-                            let forwarded = plugin.prepare_request(&mut ctx).unwrap();
-                            assert_eq!(forwarded, forward && has_client_ecs);
-                            let expected = if forwarded {
+                            let prepared = plugin.prepare_request(&mut ctx).unwrap();
+                            assert_eq!(prepared.forwarded_client_ecs, forward && has_client_ecs);
+                            let expected = if prepared.forwarded_client_ecs {
                                 Some(client_ecs.clone())
                             } else {
                                 preset.or(send.then_some(peer)).map(|ip| {
@@ -355,7 +453,12 @@ mod tests {
                 if has_client_ecs {
                     add_ecs_option(ctx.request_mut(), "198.51.100.9".parse().unwrap(), 24);
                 }
-                assert!(!plugin.prepare_request(&mut ctx).unwrap());
+                assert!(
+                    !plugin
+                        .prepare_request(&mut ctx)
+                        .unwrap()
+                        .forwarded_client_ecs
+                );
                 assert_eq!(request_has_ecs(&ctx.request), forward && has_client_ecs);
                 let opt = ctx.request.edns().as_ref().unwrap();
                 assert!(opt.flags().dnssec_ok);
@@ -403,21 +506,25 @@ mod tests {
             };
             let mut ctx = make_context(DNSClass::IN);
             add_ecs_option(ctx.request_mut(), "198.51.100.9".parse().unwrap(), 24);
-            plugin.execute(&mut ctx).await.unwrap();
-            let actual = ctx
-                .request
-                .edns()
-                .as_ref()
-                .and_then(|edns| edns.option(EdnsCode::Subnet));
-            let expected = expected.map(|(ip, mask)| {
-                EdnsOption::Subnet(ClientSubnet::new(ip.parse().unwrap(), mask, 0))
-            });
-            assert_eq!(actual, expected.as_ref(), "param={param:?}");
+            let observed = Arc::new(Mutex::new(Vec::new()));
+            plugin
+                .execute_with_next(&mut ctx, Some(probe_next(observed.clone(), None)))
+                .await
+                .unwrap();
+            let observed = observed.lock().expect("probe observation poisoned").clone();
+            let actual = observed.first().cloned().flatten();
+            let expected =
+                expected.map(|(ip, mask)| ClientSubnet::new(ip.parse().unwrap(), mask, 0));
+            assert_eq!(actual, expected, "param={param:?}");
+            assert!(
+                !request_has_ecs(&ctx.request),
+                "synthesized ECS should be cleared from the request after the chain"
+            );
         }
     }
 
     #[tokio::test]
-    async fn test_ecs_handler_send_inserts_request_ecs_and_strips_response_ecs() {
+    async fn test_ecs_handler_send_synthesizes_ecs_for_downstream_and_clears_it_after() {
         let plugin = EcsHandler {
             tag: "ecs".to_string(),
             forward: false,
@@ -432,14 +539,81 @@ mod tests {
         add_ecs_option(&mut response, IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 24);
         ctx.set_response(response);
 
+        let observed = Arc::new(Mutex::new(Vec::new()));
         plugin
-            .execute_with_next(&mut ctx, None)
+            .execute_with_next(&mut ctx, Some(probe_next(observed.clone(), None)))
             .await
             .expect("continuation execute should succeed");
-        assert!(request_has_ecs(&ctx.request));
+
+        let observed = observed.lock().expect("probe observation poisoned").clone();
+        assert_eq!(observed.len(), 1, "downstream executor should run once");
+        assert!(
+            observed[0].is_some(),
+            "synthesized ECS should be visible to downstream executors"
+        );
+        assert!(
+            !request_has_ecs(&ctx.request),
+            "synthesized ECS should be cleared from the request after the chain"
+        );
         assert!(
             !request_has_ecs(ctx.response().expect("response should exist")),
             "response ECS should be stripped when not forwarded from client"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_ecs_handler_keeps_request_ecs_replaced_by_downstream() {
+        let plugin = EcsHandler {
+            tag: "ecs".to_string(),
+            forward: false,
+            send: true,
+            preset: None,
+            mask4: 24,
+            mask6: 48,
+        };
+        let mut ctx = make_context(DNSClass::IN);
+
+        let replacement = ClientSubnet::new(IpAddr::V4(Ipv4Addr::new(198, 51, 100, 7)), 24, 0);
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        plugin
+            .execute_with_next(
+                &mut ctx,
+                Some(probe_next(observed.clone(), Some(replacement.clone()))),
+            )
+            .await
+            .expect("continuation execute should succeed");
+
+        assert_eq!(
+            message_ecs(&ctx.request),
+            Some(&replacement),
+            "a downstream replacement must survive the post-stage cleanup"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_ecs_handler_forward_keeps_client_ecs_on_request_after_chain() {
+        let plugin = EcsHandler {
+            tag: "ecs".to_string(),
+            forward: true,
+            send: true,
+            preset: None,
+            mask4: 24,
+            mask6: 48,
+        };
+        let mut ctx = make_context(DNSClass::IN);
+        let client_ecs = ClientSubnet::new(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)), 24, 0);
+        add_ecs_option(ctx.request_mut(), IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)), 24);
+
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        plugin
+            .execute_with_next(&mut ctx, Some(probe_next(observed.clone(), None)))
+            .await
+            .expect("continuation execute should succeed");
+
+        assert_eq!(
+            message_ecs(&ctx.request),
+            Some(&client_ecs),
+            "forwarded client ECS must stay on the request"
         );
     }
 
@@ -523,11 +697,21 @@ mod tests {
         let mut ctx = make_context(DNSClass::IN);
         let _ = ensure_opt_record(ctx.request_mut());
 
+        let observed = Arc::new(Mutex::new(Vec::new()));
         plugin
-            .execute_with_next(&mut ctx, None)
+            .execute_with_next(&mut ctx, Some(probe_next(observed.clone(), None)))
             .await
             .expect("continuation execute should succeed");
-        assert!(request_has_ecs(&ctx.request));
+
+        assert!(
+            observed.lock().expect("probe observation poisoned")[0].is_some(),
+            "synthesized ECS should be appended to the existing OPT record"
+        );
+        assert!(
+            ctx.request.edns().is_some(),
+            "the OPT record itself must be kept"
+        );
+        assert!(!request_has_ecs(&ctx.request));
     }
 
     #[tokio::test]
@@ -542,12 +726,18 @@ mod tests {
         };
         let mut ctx = make_context(DNSClass::IN);
 
+        let observed = Arc::new(Mutex::new(Vec::new()));
         plugin
-            .execute_with_next(&mut ctx, None)
+            .execute_with_next(&mut ctx, Some(probe_next(observed.clone(), None)))
             .await
             .expect("continuation execute should succeed");
-        assert!(request_has_ecs(&ctx.request));
+
+        assert!(
+            observed.lock().expect("probe observation poisoned")[0].is_some(),
+            "synthesized ECS should be created for the downstream chain"
+        );
         assert!(ctx.request.edns().is_some());
+        assert!(!request_has_ecs(&ctx.request));
     }
 
     #[tokio::test]
