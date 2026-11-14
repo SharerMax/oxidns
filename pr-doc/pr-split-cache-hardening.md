@@ -1,8 +1,13 @@
 # 方案:拆分 `fix/cache-hardening`
 
-> **状态:P2 已改为窄化版并另立分支;其余子 PR 待确认。** 原 P2(`44c39246`,链后剥离**全部**请求 ECS)与上游 PR #426(`afc23736`)的链前剥离语义冲突,已放弃:分支 `fix/ecs-request-strip` 删除,提交归档于标签 `archive/ecs-request-strip`。窄化版(只清理**内部合成**的 ECS,其余语义完全遵循上游)另立分支 `fix/ecs-synthesized-strip`,基线 `origin/main` @ `a3dd95c0`,PR 尚未创建(`gh` 未登录)。
-> P1/P3/P4 仍未执行,且基线已变化(见文末「执行记录」),冲突预期需按新基线重新核对。
-> 确认项见文末「待定项」,确认后才开始其余分支操作。
+> **状态(2026-11-14):P1/P3/P4 已执行完毕。** 按原 4-PR 方案、待定项按默认(4-PR 粒度、`bc838851`/`770f51a0` 等价物整提交跟随 P4)落盘,基线改为 `main` @ `ad2046d3`:
+> - P1 → `fix/cache-ecs-scope`:`e2c65e2f`(原 `c49fdc2b`+`ea831344` 合并落盘)→ `eb55a886`(原 `20f48f70`,文档按 `website/docs/` 新路径重放;single-flight 文档段未随 P1 携带)
+> - P2 → `fix/ecs-synthesized-strip`(窄化版,`c884c592`,此前已就绪)
+> - P3 → `perf/cache-ttl`:`b9bc5cec`(原 `959f558e`)→ `f63fb852`(原 `93797a12`,与上游 #422 的 `persistence.rs` 冲突已手工合)→ `43c8dfc0`(原 `2c8c03b0`)
+> - P4 → `feat/cache-single-flight`:`eb2eca56`(原 `9ddc9540`)→ `5b14efd5`(原 `d20fa028`+`770f51a0` 等价内容;栈式依赖 `fix/cache-ecs-scope`,与 P1 的语义顺序保持)
+> 总览见 `pr-series-review-fixes.md` 的「拆分执行结果」。
+
+> **历史状态:P2 已改为窄化版并另立分支。** 原 P2(`44c39246`,链后剥离**全部**请求 ECS)与上游 PR #426(`afc23736`)的链前剥离语义冲突,已放弃:分支 `fix/ecs-request-strip` 删除,提交归档于标签 `archive/ecs-request-strip`。窄化版(只清理**内部合成**的 ECS,其余语义完全遵循上游)另立分支 `fix/ecs-synthesized-strip`,基线 `origin/main` @ `a3dd95c0`,PR 尚未创建(`gh` 未登录)。
 
 - 源分支:`fix/cache-hardening`(tip `770f51a0`)——**已移除**:本地与 fork 上的分支均已删除,其提交以标签 `archive/cache-hardening`(同 tip)归档,P1/P3/P4 从该标签 cherry-pick
 - 基线:`origin/release/v1.7.0` —— 记录时为 `871f8da3`,**现已推进到 `56b7b10f`(v1.7.0 发布准备)**

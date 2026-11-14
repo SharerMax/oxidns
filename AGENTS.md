@@ -39,6 +39,8 @@
 - `docs/` contains repository-maintained project documentation; AI and agent guidance lives under `docs/ai/`.
 - Detailed internal architecture and dependency-boundary guidance lives in `docs/ai/architecture.md`.
 - WebUI-specific guidance lives in `docs/ai/webui.md`; follow it for changes under `webui/`.
+- `learning/` holds long-form implementation analyses and the standalone architecture page; treat them as study material rather than the behavior contract.
+- `pr-doc/` holds design notes and PR series write-ups kept for review history; code, configuration, and tests remain the source of truth.
 
 ## Build, Test, and Development Commands
 

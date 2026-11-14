@@ -4,6 +4,9 @@
 基线:分支 `fix/code-review-priorities`,系列 6 个提交(含 1 个修正确认提交),从应急正确性修复到结构性替换。
 建议 PR 标题:`refactor(upstream): semaphore-backed pool capacity`
 
+> **执行结果(2026-11-14)**:已拆出分支 `feat/semaphore-pools`,栈式依赖 `feat/staged-reload`(S4 需要 PR-A 的 `build_registry`),5 提交:`8d4ebe81`(S1+S2)→ `220b2c6a`(S3)→ `a0e5394b`(S4 bench,原 `3e3db421` 的 bench 子集;reload-phase 部分归 `feat/staged-reload` 的 `a4a922a6`,设计文档元数据已剔除,提交改题)→ `cef5a7b2`(原 `a39dcef5`)→ `60859df2`(criterion async 特性带来的 Cargo.lock 增量)。PR 未建。
+> 冲突适配:`ac055074`/`cd9f5cbc` 的父提交含 `3f14471d`(wakeup collapse),main 尚未包含该修复(已拆为 `fix/upstream-pool-wakeup-collapse` @ `5a6a4eab`);cherry-pick 时按信号量方案整体删除手写等待记账(`active_count` 调整、`release_notified` 通知),41 项 pool 测试通过。注意:池容量 v2 方案另在 `feat/upstream-pool-capacity-signal`,两分支评审时二选一。
+
 ## 提交清单(按边界,依序 cherry-pick)
 
 | # | 提交 | 标题 | 性质 | 依赖 |

@@ -4,6 +4,9 @@
 基线:分支 `fix/code-review-priorities`,系列 3 个 PR、5 个提交,自低风险纯重构起步,逐步引入行为变更。其中 `cd9881f4` 是第 2 项内的 API 路由回归修复,`03ac4154` 是第 3 项后的编译告警修复。
 建议 PR 标题:`feat(reload): staged zero-downtime configuration reload`
 
+> **执行结果(2026-11-14)**:已拆出分支 `feat/staged-reload`(基线 `main` @ `ad2046d3`,5 提交按原序):`62c4c4f3`(PR-A)→ `5b813a4f`(PR-B)→ `e6442e91`(追加修复)→ `a4a922a6`(PR-D)→ `a11b4878`(非 Unix 门控)。PR 未建。
+> 与 main 的基线适配:main 的 `d11368b2` 已重命名启动函数,落地时用 main 命名(`run_foreground`/`restart_process`/`run_with_tokio_runtime`/`run_application`/`stop_application`);main 的 `StartupSession` 已提供构建/发布分离的会话语义,PR-A 保留 main 的 `start_with`,仅新增 `retire_previous_runtime`/`install_outbound_profiles`/`build_registry`/`install_runtime` 供 `stage_runtime`/`commit_staged_runtime` 使用;bootstrap.rs 同时保留 main 的 `start_application`(供全新启动与回滚,保留缓存持久化保护测试)与新增的 `prepare_assembly`/`activate_assembly`/`stop`(`stop` 不做全局任务清理,仅用于 staged swap 点);classic 回滚路径改用 `start_application`。
+
 ## 提交清单(按边界,依序 cherry-pick)
 
 | # | 提交 | 标题 | 性质 | 依赖 |

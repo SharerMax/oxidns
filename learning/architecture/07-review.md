@@ -8,7 +8,7 @@
 
 方法:四个方向并行深读(服务器与 DNS 核心 / 执行器链与缓存 / 网络基础设施 / 生命周期与 API·配置),全部结论带 `file:line` 证据;P0 与 P1 结论逐条人工复核过源码。
 
-**修复进展**:评审问题已修复 24 项(P0×2 · P1×5 · P2×4 · P3×13),其余 11 项缓议并在下表注明原因;分支 `fix/code-review-priorities` 自 v1.6.1(`bd183f69`)起累计 117 个提交(114 个非合并:74 项代码与工程改动 + 40 项文档与学习笔记),fmt/clippy 全 bundle 通过。按子系统拆分后,系列 1(PR #401)与系列 2(PR #402,#412 补齐 opcode/DoQ 关停)已合入 main(随 v1.7.0 发布);系列 3 拆为四个子 PR(P1–P4),其中 P2 经历两次收敛:全量剥离版(链后剥离全部请求 ECS)与上游 PR #426(`afc23736`)的链前剥离语义冲突,已放弃;窄化版只清理**内部合成**的 ECS,另立分支 `fix/ecs-synthesized-strip`(基线 `origin/main`),待建 PR;P1(ECS scope insert 校验)与 P4(single-flight)尚未进 main;系列 4 的 DoH 响应体上限与压缩指针环检测已分别合入上游(#431 / #432,上游随后以 `83153730` 收紧环判定),对应分支已删除;bootstrap 池的 `load_full` 调整与 probe 的有界阻塞池调整已分别单独成 PR(分支 `perf/upstream-bootstrap-load-full`、`perf/probe-blocking-pool`,基线 `origin/main`);EDNS0 系列的 E1(`EdnsOption::code()` 公共 API 重构)已由上游以 PR #415(`343f9208`)合入,E2/E3(`drop_edns0opt` executor 与 `edns0opt` matcher)未进 main——`edns0opt` matcher 当前在本地分支 `feat/edns0opt-matcher`,上游方向上以 #425 的 `edns_filter`(请求 EDNS0 选项过滤)覆盖了部分需求;系列 5–7 尚未建 PR(系列 7 的 staged reload 需按上游托管生命周期重做)。上游已推进到 v1.7.1(`ad2046d3`):#422 修复缓存 dump 覆盖(见「已知缺口」)、#433 改进配置保存错误处理、hotpath CI 增加回归门禁与 PR 自动评论(`c141fe96`、`ad2046d3`)。提交号为对应分支短哈希。
+**修复进展**:评审问题已修复 24 项(P0×2 · P1×5 · P2×4 · P3×13),其余 11 项缓议并在下表注明原因;分支 `fix/code-review-priorities` 自 v1.6.1(`bd183f69`)起累计 117 个提交(114 个非合并:74 项代码与工程改动 + 40 项文档与学习笔记),fmt/clippy 全 bundle 通过。**2026-11-14 更新:该分支已按子系统拆分完毕并删除**,全部未合入提交已按系列落到基于 main 的独立分支(哈希映射见 `pr-doc/pr-series-review-fixes.md`「拆分执行结果」);本文及各页提到的「未进 main」提交,除已注明被上游覆盖/丢弃者外,均可在对应分支中找到。按子系统拆分后,系列 1(PR #401)与系列 2(PR #402,#412 补齐 opcode/DoQ 关停)已合入 main(随 v1.7.0 发布);系列 3 拆为四个子 PR(P1–P4),其中 P2 经历两次收敛:全量剥离版(链后剥离全部请求 ECS)与上游 PR #426(`afc23736`)的链前剥离语义冲突,已放弃;窄化版只清理**内部合成**的 ECS,另立分支 `fix/ecs-synthesized-strip`(基线 `origin/main`),待建 PR;P1(ECS scope insert 校验)与 P4(single-flight)已拆分支 `fix/cache-ecs-scope` 与 `feat/cache-single-flight`;系列 4 的 DoH 响应体上限与压缩指针环检测已分别合入上游(#431 / #432,上游随后以 `83153730` 收紧环判定),对应分支已删除;bootstrap 池的 `load_full` 调整与 probe 的有界阻塞池调整已分别单独成 PR(分支 `perf/upstream-bootstrap-load-full`、`perf/probe-blocking-pool`,基线 `origin/main`);EDNS0 系列的 E1(`EdnsOption::code()` 公共 API 重构)已由上游以 PR #415(`343f9208`)合入,E2/E3(`drop_edns0opt` executor 与 `edns0opt` matcher)未进 main——`edns0opt` matcher 当前在本地分支 `feat/edns0opt-matcher`,上游方向上以 #425 的 `edns_filter`(请求 EDNS0 选项过滤)覆盖了部分需求;系列 5–7 尚未建 PR(系列 7 的 staged reload 需按上游托管生命周期重做)。上游已推进到 v1.7.1(`ad2046d3`):#422 修复缓存 dump 覆盖(见「已知缺口」)、#433 改进配置保存错误处理、hotpath CI 增加回归门禁与 PR 自动评论(`c141fe96`、`ad2046d3`)。提交号为对应分支短哈希。
 
 | 指标 | 数值 | 说明 |
 |------|------|------|
@@ -88,7 +88,7 @@
 
 ## 设计与实施(重构系列)
 
-评审修复与两个架构级优化已全部实施并推送分支 `fix/code-review-priorities`(117 个提交:114 个非合并,74 项代码与工程改动 + 40 项文档与学习笔记;fmt/clippy 全 bundle 通过)。全部提交按子系统拆为可独立评审的 PR 系列,拆分方案、cherry-pick 序列与 PR 描述要点见 `pr-doc/` 目录:`pr-series-review-fixes.md`(五个修复系列)、`pr-series-staged-reload.md`、`pr-series-semaphore-pools.md`、`pr-series-edns0.md`、`pr-split-cache-hardening.md`(缓存系列四拆)。现状:系列 1/2 已合入 main(#401/#402,#412 补齐);系列 3 拆为 P1–P4,P2 窄化版已建分支待建 PR;EDNS0 系列 E1 已由上游 #415 合入,E2/E3 待建 PR;系列 4 的 #431/#432 已合入上游;系列 5–7 待发。
+评审修复与两个架构级优化已全部实施并推送分支 `fix/code-review-priorities`(117 个提交:114 个非合并,74 项代码与工程改动 + 40 项文档与学习笔记;fmt/clippy 全 bundle 通过)。**2026-11-14 拆分已完成并清理:原分支已删除**,全部提交按子系统拆为基于 main 的独立分支(哈希映射见 `pr-doc/pr-series-review-fixes.md` 的「拆分执行结果」一节;拆分方案、cherry-pick 序列与 PR 描述要点见 `pr-doc/` 目录:`pr-series-review-fixes.md`(五个修复系列)、`pr-series-staged-reload.md`、`pr-series-semaphore-pools.md`、`pr-series-edns0.md`、`pr-split-cache-hardening.md`(缓存系列四拆);学习笔记与 PR 文档迁至 `learning-doc` 分支)。现状:系列 1/2 已合入 main(#401/#402,#412 补齐);系列 3 拆为 P1–P4 并已落分支(`fix/cache-ecs-scope`、`perf/cache-ttl`、`feat/cache-single-flight`,P2 窄化版即 `fix/ecs-synthesized-strip`);EDNS0 系列 E1 已由上游 #415 合入,matcher 已拆 `feat/edns0opt-matcher`,`drop_edns0opt` 被上游 #425 `edns_filter` 覆盖后丢弃;系列 4 的 #431/#432 已合入上游,余量拆 `fix/upstream-hardening`;系列 5 拆 `fix/service-upgrade`;系列 6 拆 `feat/semaphore-pools`(v2 方案另见 `feat/upstream-pool-capacity-signal`);系列 7 拆 `feat/staged-reload`。以上均已基于 main 落盘、待建 PR。
 
 | 系列 | 提交 | 核心内容 | 状态 | 风险 |
 |------|------|----------|------|------|
@@ -97,8 +97,8 @@
 | 3 缓存正确性与性能 | 4 拆为 P1–P4 | **P0** ECS 跨客户端污染修复(insert/lazy 校验 + 请求侧剥离)· single-flight(含重新选举)· 采样 LRU 轮转 · dump 加固 · stale 语义文档 | P2 窄化版(`fix/ecs-synthesized-strip`)待建 PR;P1/P3/P4 未进 main;dump 覆盖保护部分由上游 #422 覆盖 | 低 |
 | 4 上游与协议健壮性 | 7 | DoH 响应体上限 · 阻塞解析出 worker · 随机事务 ID · 指针环 O(1) | #2、#6 已合入上游(#431/#432);#3、#7 已单独成 PR;其余未建 PR | 低 |
 | 5 平台与升级 | 3 | Windows SCM 优雅关停 · 错误退出码 · 升级超时/回滚日志 | 未建 PR,未进 main | 中 |
-| 6 Semaphore Pools(重构) | 6 | ReusePool/PipelinePool 迁移 Semaphore;两池零手写 notify;churn 基准护栏;含应急唤醒修复 `3f14471d`(该项已进 main) | 未建 PR | 中 |
-| 7 Staged Reload(重构) | 5 | Unix 重载零拒连、坏配置零回滚;指标分代;`/reload/status` 带 phase;插件路由进候选 hub;非 Unix 回退仅条件编译 | 未建 PR(需按上游托管生命周期重做) | 中 |
+| 6 Semaphore Pools(重构) | 6 | ReusePool/PipelinePool 迁移 Semaphore;两池零手写 notify;churn 基准护栏;含应急唤醒修复 `3f14471d`(该项已拆 `fix/upstream-pool-wakeup-collapse` 待建 PR) | 已拆 `feat/semaphore-pools`(栈式依赖 `feat/staged-reload`);v2 方案另在 `feat/upstream-pool-capacity-signal` | 中 |
+| 7 Staged Reload(重构) | 5 | Unix 重载零拒连、坏配置零回滚;指标分代;`/reload/status` 带 phase;插件路由进候选 hub;非 Unix 回退仅条件编译 | 已拆 `feat/staged-reload`(已按 main 的 `StartupSession` 生命周期适配落盘),待建 PR | 中 |
 | EDNS0 选项过滤与匹配 | 4 | `EdnsOption::code()` 公共 API(纯重构前置)· `drop_edns0opt` executor · `edns0opt` matcher · WebUI 注册 | E1 已由上游 #415 合入;E2/E3 待建 PR(`edns0opt` matcher 当前在本地分支 `feat/edns0opt-matcher`) | 低 |
 
 > 另有共享 lint 提交 `87cad1b2`(横跨系列 1/4/5 的文件,须在其依赖的提交之后携带);分支元数据提交(设计文档状态、系列拆分与学习笔记)不进上游。当前合并顺序:P1(ECS scope 校验)→ P4(single-flight,需 P1)→ P3 → 系列 4 剩余/5 → 6(semaphore;`3f14471d` 上下文已在 main)→ EDNS0 E2/E3 → 7(staged-reload,体量最大且需按上游托管生命周期重做)。缓存子 PR 一律从 main 新建分支,避免重新引入 #403,冲突预期见 `pr-doc/pr-split-cache-hardening.md`。

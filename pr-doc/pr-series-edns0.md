@@ -3,6 +3,8 @@
 基线：分支 `fix/code-review-priorities`（HEAD `42eb9377`），相对 `origin/main`（`b15094d4`）领先 92 个提交。
 本系列是分支末尾的 4 个提交；其余提交见 `pr-series-review-fixes.md`、`pr-series-semaphore-pools.md`、`pr-series-staged-reload.md`。
 
+> **执行结果（2026-11-14）**：E1（`6e5574db` + `42eb9377`）已随 `refactor/edns0-option-code` 合入 main（PR #415）；E2 中的 matcher 已单独拆出 `feat/edns0opt-matcher`（基线 main，提交 `3a6bf04d`，PR 未建）；E2 中的 `drop_edns0opt`（`9ba81e58`）**丢弃**——上游 PR #425（`bfe29240`，`edns_filter` executor：preserve/strip/strip_unknown 策略 + allow/deny 列表）已覆盖该能力，重建会造成功能重复。
+
 结论：
 
 - 不应把整个领先区间合成一个 PR；本系列也不并入 review-fixes 的既有 5 个系列——它与缓存/上游/重载无共享行为面，独立评审成本最低。

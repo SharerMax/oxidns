@@ -2,7 +2,46 @@
 
 将分支 `fix/code-review-priorities` 上代码评审产生的修复提交,按子系统拆为可独立评审的系列。两个重构系列(staged-reload / semaphore-pools)见各自文档;本文覆盖其余全部提交。
 
-> **现状(2026-11)**
+> **现状(2026-11-14,拆分已完成)**:本文所述拆分方案已全部执行完毕,结果以文末「拆分执行结果」一节为准;原分支 `fix/code-review-priorities` 已删除,学习笔记与 PR 文档迁至 `learning-doc` 分支。以下「现状(2026-11)」为拆分执行前的历史记录。
+
+## 拆分执行结果(2026-11-14)
+
+基线一律为 `main` @ `ad2046d3`。除注明栈式依赖的分支外,其余分支均直接基于 main;学习笔记与 PR 文档(含本文)已迁至 `learning-doc`,原分支 `fix/code-review-priorities` 删除(本地与 fork)。
+
+| 系列/去向 | 分支 | 提交(新哈希,按序) | 状态 |
+|---|---|---|---|
+| 系列 1 API 加固 | 已在 main | —(#401,#433 补 config 原子写) | ✅ 合入 |
+| 系列 2 DNS 服务加固 | 已在 main | —(#402,#412 兜底) | ✅ 合入 |
+| 系列 3 P1 ECS scope 校验 | `fix/cache-ecs-scope` | `e2c65e2f` → `eb55a886` | 已拆出,PR 未建 |
+| 系列 3 P2 窄化 ECS 剥离 | `fix/ecs-synthesized-strip` | `c884c592` | 已拆出,PR 未建 |
+| 系列 3 P3 TTL/LRU/dump | `perf/cache-ttl` | `b9bc5cec` → `f63fb852` → `43c8dfc0` | 已拆出,PR 未建 |
+| 系列 3 P4 single-flight | `feat/cache-single-flight` | `eb2eca56` → `5b14efd5`(栈式依赖 `fix/cache-ecs-scope`) | 已拆出,PR 未建;P4 需 P1 先合 |
+| 系列 4 余量 | `fix/upstream-hardening` | `0720d1b1` → `bc6ba563` → `ae8924bf` | 已拆出,PR 未建 |
+| 系列 5 平台与升级 | `fix/service-upgrade` | `d085dfc4` → `18c23e04` → `f22efd76` | 已拆出,PR 未建 |
+| 共享 lint `87cad1b2` | `refactor/plugin-cleanup` | `018fb507` | 仅保留 dial.rs needless_bool 修复;其余 hunk 依赖的系列提交不在 main 上,对应 lint 已随目标分支落地 |
+| 其他清理(`31f20124`/`0e43f157`/`b1d81777`) | `refactor/plugin-cleanup` | `70192881` → `3ad897ee` → `e3d459ec` | 已拆出,PR 未建 |
+| staged-reload | `feat/staged-reload` | `62c4c4f3` → `5b813a4f` → `e6442e91` → `a4a922a6` → `a11b4878` | 已拆出,PR 未建;详见 `pr-series-staged-reload.md` |
+| semaphore-pools S1–S3 + S4 bench | `feat/semaphore-pools` | `8d4ebe81` → `220b2c6a` → `a0e5394b` → `cef5a7b2` → `60859df2` | 已拆出,PR 未建;栈式依赖 `feat/staged-reload`;池容量 v2 方案另在 `feat/upstream-pool-capacity-signal` |
+| EDNS0 E1 重构 | 已在 main | —(#415) | ✅ 合入 |
+| EDNS0 E2 matcher | `feat/edns0opt-matcher` | `3a6bf04d` | 已拆出,PR 未建 |
+| EDNS0 E2 drop_edns0opt | 丢弃 | — | 上游 #425 `bfe29240`(edns_filter:preserve/strip/strip_unknown 策略)已覆盖 |
+| disable_ecs + revert | 丢弃 | — | net-zero |
+| ecs 请求侧全量剥离 | 丢弃 | — | 与上游 #426 语义相反,窄化版即 P2 |
+| wakeup collapse 应急修复 | `fix/upstream-pool-wakeup-collapse` | `5a6a4eab` | 已拆出,PR 未建 |
+| bootstrap load_full | `perf/upstream-bootstrap-load-full` | `66f1f56f` | 已拆出,PR 未建 |
+| probe 阻塞池 | `perf/probe-blocking-pool` | `e8569e95` | 已拆出,PR 未建 |
+| WebUI 跳过原因 i18n | `fix/webui-cache-skip-reason-i18n` | `c0b0a930` | 已拆出,PR 未建 |
+| DoH 64KiB / 压缩指针 O(1) / config 保存原子写 | 已在 main | —(#431 / #432 / #433) | ✅ 合入 |
+| 学习笔记 / PR 文档 | `learning-doc` | `91e9a542` + 回填提交 | 已迁出 |
+
+拆分过程中的基线适配(main 已领先原基线):
+
+- `refactor(app): clarify startup and lifecycle function names`(main `d11368b2`)重命名了 app.rs 启动函数;系列 5 的 `0145cf63` 与 staged-reload 系列按 main 命名(`run_foreground`/`restart_process`/`run_with_tokio_runtime`/`run_application`/`stop_application`)落盘,SCM 优雅关停复用 main 已有的 `run_control_loop`。
+- main 的 `StartupSession`(`initialize`/`activate`/`abort`)已承担 PR-A「构建/发布分离」的会话语义;PR-A(`62c4c4f3`)保留 main 的 `start_with` 实现,仅新增 `retire_previous_runtime`/`install_outbound_profiles`/`build_registry`/`install_runtime` 供 `stage_runtime`/`commit_staged_runtime` 使用,并把 `session.initialize` 的旧代退役步骤改走 `retire_previous_runtime`。bootstrap.rs 同时保留 main 的 `start_application`(会话语义 + 缓存持久化保护测试)与新增的 `prepare_assembly`/`activate_assembly`/`stop`(staged 专用;`stop` 不做全局任务清理,swap 点专用)。
+- 插件参考文档已迁 `website/docs/`;系列 3 的文档块按新路径重放,`38aec719` 中 single-flight 文档段随 P4 携带,未混入 P1。
+- `3e3db421` 中 reload-phase 部分已属 `a4a922a6`,semaphore 分支仅保留 bench 与 cfg 统一(提交改题为 S4),并剔除设计文档元数据。
+
+> **现状(2026-11,拆分前历史记录)**
 > - 系列 1(PR #401)与系列 2(PR #402)已合入 `release/v1.7.0`(merge `52ae666c` / `12f6de71`);上游在 #402 合入后又补了 opcode/DoQ 修复(#412, `4daa4f2c`),本系列无需再动。
 > - 分支已合并 `origin/main`(`488237ff`,+6 提交:docker ARMv7、hotpath-cloud 配置);**未**合并 release。
 > - 系列 3 的原 PR 分支 `fork/fix/cache-hardening` **已删除**(本地与 fork),提交以标签 `archive/cache-hardening` @ `770f51a0` 归档;该分支基线为修复前的 `871f8da3`,不含上游 #422,直接出 PR 会重新引入 #403。系列 3 已拆为 P1–P4 四个子 PR,方案见 `pr-split-cache-hardening.md`;其中 P2 的全量剥离版(链后剥离全部请求 ECS)与上游 #426(`afc23736`)的链前剥离语义冲突,已放弃并删除分支(归档标签 `archive/ecs-request-strip`),窄化版(只清理**内部合成**的 ECS)另立分支 `fix/ecs-synthesized-strip`,基线 `origin/main` @ `a3dd95c0`,PR **未建**,正文 `pr-body-ecs-synthesized-strip.md`;旧正文 `pr-body-cache-hardening.md` 同样仅作历史参考。
