@@ -3,7 +3,7 @@
 状态:已实现——S1–S5 落地(实现分支 `feat/upstream-pool-capacity-signal`,基线 `main` @ `ad2046d3`)
 基线:`main` @ `ad2046d3`(v1.7.1)
 范围:`src/infra/network/upstream/pool/{mod,reuse,pipeline}.rs`、`benches/pool_capacity_churn.rs`
-取代:`pr-doc/design-semaphore-pool-refactor.md`(v1;同分支内的前作,未合入 main)
+取代:`pr-doc/design/design-semaphore-pool-refactor.md`(v1;同分支内的前作,未合入 main)
 
 ## 0. 背景:为什么在 main 之上重做
 
