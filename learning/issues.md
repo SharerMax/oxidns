@@ -10,6 +10,7 @@
 |---|---|---|---|
 | ISSUE-001 | 消息编解码失去第三方差分校验 | 中 | 待处理 |
 | ISSUE-002 | 重载失败回滚时缓存 dump 被候选实例覆盖 | 高 | 已修复（上游） |
+| ISSUE-003 | dynamic_domain_set 测试并行运行时全局 API 路由竞争 | 中 | 待处理 |
 
 ---
 
@@ -225,3 +226,63 @@ plugins:
 - `fix/cache-hardening` @ `770f51a0` 的基线是 `871f8da3`，**不含**该修复：`git merge-base --is-ancestor 1992c8f9 archive/cache-hardening` 返回非 0。该分支已于 2026-11-11 删除（本地与 fork），提交以标签 `archive/cache-hardening` 归档；缓存子 PR 一律从 main（当前 v1.7.1 `ad2046d3`）新建分支再 cherry-pick，避免重新引入 #403。
 - 拆分方案与冲突预期见 `pr-doc/pr-split-cache-hardening.md`；与 #422 重叠的缓存子 PR（P1/P3/P4）出 PR 前需按 main 现状重放差异面。
 - 相关约束路径已随文档站点重构迁移：`docs/ai/performance.md`、`docs/ai/operations-runbook.md`。
+
+---
+
+## ISSUE-003 dynamic_domain_set 测试并行运行时全局 API 路由竞争
+
+**级别**：中（仅影响 `cargo test` 本地/CI 稳定性，不影响运行时行为；但会让质量门随机变红，掩盖真实回归）
+**发现方式**：在 `feat/provider-degraded-startup` 上跑 `cargo test --lib provider` 时随机失败；stash 改动后在基线 `ad2046d3`（main v1.7.1）上以同过滤器复现，且每次失败的用例集不同，确认为与改动无关的预先存在问题
+**状态**：待处理
+
+### 1. 现象
+
+`cargo test --lib plugin::provider`（或全量 `cargo test --lib`）中 `dynamic_domain_set` 的若干用例随机失败，报错形如：
+
+```
+thread 'plugin::provider::dynamic_domain_set::tests::dynamic_domain_set_appends_and_matches' panicked at tests.rs:97:27:
+backend should start: Plugin("duplicate API route registered: GET /plugins/learned/rules")
+```
+
+单过滤器重跑（如 `cargo test --lib plugin::provider::dynamic_domain_set`）则全部通过；并行集合中失败集每次运行不同（`appends_and_matches`、`async_append_is_ordered_before_clear`、`rule_api_adds_removes_and_clears`、`sync_append_flushes_without_batch_or_tick` 等都出现过）。
+
+### 2. 根因
+
+三件事叠加：
+
+1. **固定 tag**：`dynamic_domain_set/tests.rs` 的所有用例都用固定 tag `"learned"`（tests.rs 第 94、123、166、199、227、262、294、328、354、432 行等），backend 启动时经 `register_plugin_api!`（`src/plugin/provider/dynamic_domain_set/api.rs:173`）注册 `GET/POST/DELETE /plugins/learned/rules` 与 `POST /plugins/learned/rules/clear`。
+2. **全局注册表**：`register_plugin_api!` 的实现（`src/api/macros.rs:13`）在 `global_api_register()` 非空时把路由注册进**当前安装的全局 hub**，而 `ApiHub::register_route`（`src/api/hub.rs:354`）对重复路由返回 `Err("duplicate API route registered: ...")`。
+3. **缺少序列化护栏**：仓库已提供 `global_api_test_guard()`（`src/api/global.rs:43`，静态 tokio Mutex）专门用于序列化"触碰全局 API 状态"的测试，`api/tests.rs`、`plugin/registry/tests.rs`、`plugin/provider/mod.rs` 的相关用例都在用；但 `dynamic_domain_set/tests.rs` **没有获取该 guard**。
+
+于是当并行测试中有其他测试恰好 `install_global_api`（runtime-control、registry、api 等测试），dynamic_domain_set 用例在护栏之外读到非空全局 register，把 `/plugins/learned/rules` 注册进**别人的 hub**；两个 dynamic_domain_set 用例同时运行时，第二个在同一 hub 上撞出重复路由，`backend should start` 断言失败。谁在时序上吃亏完全随机。
+
+### 3. 影响
+
+- 本地 `cargo test` 与 CI 质量门随机变红；重跑可通过，属于典型的 flaky test，长期会训练"重跑就行"的习惯，掩盖真实回归。
+- 不影响生产运行时：`init_plugins_with_runtime_controls` 已拒绝重复 tag，生产环境同一 tag 不会重复注册路由。
+
+### 4. 复现方式
+
+```
+cargo test --lib provider        # 多跑几次，失败集漂移
+cargo test --lib plugin::provider::dynamic_domain_set   # 单独跑则稳定通过
+```
+
+基线核查：`git stash` 后在 `ad2046d3` 上同样失败（66 passed / 3 failed，失败用例集与带改动时不同），确认与 `feat/provider-degraded-startup` 无关。
+
+### 5. 建议方案
+
+**最小修（推荐）**：`dynamic_domain_set/tests.rs` 的每个用例开头加 `let _guard = crate::api::global_api_test_guard().await;`，与 `plugin/registry/tests.rs`、`api/tests.rs` 的既有约定对齐。代价是这批用例串行，但它们都是轻量文件用例，串行开销可忽略。
+
+**叠加项（可选，防御深度）**：
+
+1. 用例内创建 backend 前 `clear_global_api()`，并在结束时恢复；使这批用例无论全局状态如何都不受污染（`register_plugin_api!` 对空全局直接跳过注册，测试仍能验证非 API 行为）。
+2. tag 加用例名后缀（`format!("learned-{}", case)`），路由天然不冲突——但注意部分用例可能断言固定路由路径，需同步调整。
+3. API 路由注册的辅助方法抽成带 `#[cfg(test)]` 的隔离注册表，属于更大的重构，不建议为本问题做。
+
+**不建议**让 `register_route` 对重复路由幂等覆盖：生产语义下重复注册意味着配置错误（tag 冲突已在 init 层拒绝，能到这里就是注册逻辑 bug），静默覆盖会掩盖问题。
+
+### 6. 关联
+
+- 相关代码：`src/plugin/provider/dynamic_domain_set/tests.rs`、`src/plugin/provider/dynamic_domain_set/api.rs`、`src/api/macros.rs`、`src/api/hub.rs`（`register_route`）、`src/api/global.rs`（`global_api_test_guard`）。
+- 发现于：`feat/provider-degraded-startup`（PR-1，rule-file 降级）质量门验证期间；该 PR 不处理本条。
