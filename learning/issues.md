@@ -11,7 +11,7 @@
 | ISSUE-001 | 消息编解码失去第三方差分校验 | 中 | 待处理 |
 | ISSUE-002 | 重载失败回滚时缓存 dump 被候选实例覆盖 | 高 | 已修复（上游） |
 | ISSUE-003 | dynamic_domain_set 测试并行运行时全局 API 路由竞争 | 中 | 待处理 |
-| ISSUE-004 | 集成测试并行运行时挂起（疑似测试锁序竞争） | 中 | 待处理 |
+| ISSUE-004 | 集成测试并行运行时挂起（过时失败用例泄漏运行时所致） | 中 | 已定位并修复（随 PR-1 `7e9f7d13`） |
 
 ---
 
@@ -290,48 +290,58 @@ cargo test --lib plugin::provider::dynamic_domain_set   # 单独跑则稳定通�
 
 ---
 
-## ISSUE-004 集成测试并行运行时挂起（疑似测试锁序竞争）
+## ISSUE-004 集成测试并行运行时挂起（过时失败用例泄漏运行时所致）
 
-**级别**：中（不影响运行时；整包 `cargo test --test plugin_integration` 在并行模式下随机整批挂起，拖垮质量门）
+**级别**：中（不影响运行时；整包 `cargo test --test plugin_integration` 并行模式下整批挂起，拖垮质量门）
 **发现方式**：在 `feat/provider-degraded-startup` / `feat/provider-degraded-api` 上验证 PR-1/PR-2 时，整包并行运行两次均挂起；串行重跑全部通过
-**状态**：待处理（未在 main 基线上复跑确认，建议先基线复核）
+**状态**：已定位并修复（随 PR-1 的用例语义对齐提交 `7e9f7d13` 消除；见 §7）
 
 ### 1. 现象
 
-`cargo test --test plugin_integration`（默认并行）运行时，首批用例正常完成后，**一波用例同时报 "has been running for over 60 seconds"**，此后整批无限期停滞，600 秒以上无进展。两次观察挂起波及的用例集基本一致（dot 断连、ECS handler、edns_filter、geosite/geoip、hosts、has_cname、http_request 等约 15+ 个），但这些用例**单独运行均瞬间通过**。
+`cargo test --test plugin_integration`（默认并行）运行时，首批用例正常完成后，`test_geo_provider_failure_paths_are_reported` 报 FAILED，随后**一波用例同时报 "has been running for over 60 seconds"**，整批无限期停滞，600 秒以上无进展。挂起波及的用例（dot 断连、ECS handler、edns_filter、geosite/geoip、hosts、has_cname、http_request 等约 15+ 个）单独运行均瞬间通过。
 
-### 2. 取证
+三次挂起观察中，该 FAILED 均先于挂起出现；修复该用例后并行运行不再挂起。
+
+### 2. 取证（含 main 基线复核）
 
 - 单测隔离运行：`test_dot_disconnect_preserves_cache_fill_and_shutdown_waits_for_requests` 单独跑 0.05s 通过；其他挂起用例同理。
-- 串行全包：`cargo test --test plugin_integration -- --test-threads=1` → **116 passed / 0 failed，29.04s**（Windows 本机，`feat/provider-degraded-api` @ `1b590a19`）。
-- 结论：全部用例本身健康；挂起只出现在默认并行模式，是测试间资源竞争。
+- 串行全包：`cargo test --test plugin_integration -- --test-threads=1` → **116 passed / 0 failed，29.04s**（`feat/provider-degraded-api` @ `1b590a19`，含过时用例）。
+- **main 基线并行复核**：`learning-doc`（代码 = main `ad2046d3`）→ **115 passed / 0 failed，29.68s，无挂起**。
+- PR-1 分支（测试已修复）并行 → **116 passed，30.17s，无挂起**。
+- PR-2 分支（未含修复，过时用例仍在）并行 → FAILED + 挂起（两次复现）。
+- PR-2 分支合入 `7e9f7d13` 后并行 → **116 passed，29.89s，无挂起**。
 
-### 3. 根因假设
+结论：挂起不是预存的锁序竞争（main 基线干净），而是**过时失败用例的 panic 泄漏运行时状态**触发。
 
-`tests/plugin_integration.rs` 的 `parse_config` 辅助会对每个用例调用 `plugin::enable_runtime_test_serialization()`（plugin_integration.rs:60-61），使所有走 `plugin::init` 的用例共享一把全局测试互斥（`src/plugin/registry/runtime.rs` 的 `test_runtime_lock`）。`runtime.rs` 注释明确了锁序约定：**"Tests must acquire their serialization permit before lifecycle"**。
+### 3. 根因
 
-疑似存在 AB-BA 锁序竞争：某个并行用例以不同顺序获取"全局 API 测试护栏（`global_api_test_guard`）"与"runtime 序列化/生命周期锁"（或 metrics 注册锁等另一全局锁），一个用例持 A 等 B、另一个持 B 等 A，死锁的用例卡住生命周期租约，后续所有 `plugin::init` 用例全部排队，表现为整批挂起。具体持锁方尚未定位（挂起时未采集线程栈）。
+PR-1 翻转了默认行为：geoip selector 无匹配时 `plugin::init` 由"失败"改为"降级成功"。过时的 `test_geo_provider_failure_paths_are_reported` 仍断言 `expect_err`，于是：
 
-另注：PR-1/PR-2 在 `ProviderRuntimeControl::new/drain` 中注册/注销全局 metrics 源（独立 std::Mutex，无跨锁持有），未观察到与其相关的证据，但基线复核前不能完全排除交互。
+1. `plugin::init` 成功返回，运行时已**激活**并注册为全局 current_runtime（含 providers、outbound、metrics 源等全局状态）；
+2. 测试线程在 `expect_err` 处 panic，用例中止——**该运行时永远不会被 destroy**；
+3. 泄漏的运行时污染后续并行用例共享的全局状态，后续走 `plugin::init` 的用例在测试串行化护栏（`enable_runtime_test_serialization`，plugin_integration.rs:60-61）上排队异常，表现为整批挂起。panic 与挂起之间的精确传播路径（哪一步阻塞）尚未逐帧定位，但"移除过时用例 panic ↔ 挂起消失"在 4 次对照运行中稳定成立。
 
 ### 4. 影响与复现
 
 ```
-cargo test --test plugin_integration            # 默认并行：随机整批挂起
-cargo test --test plugin_integration -- --test-threads=1   # 串行：稳定通过
+# 复现（需构造一个在 init 成功后 panic 的用例；旧语义用例配新代码即触发）
+cargo test --test plugin_integration            # 过时用例存在时：FAILED + 整批挂起
+cargo test --test plugin_integration -- --test-threads=1   # 串行：也会失败但不会拖垮全包
 ```
 
-CI 与本地质量门在并行模式下不稳定。与 ISSUE-003 同属"测试全局状态竞争"类问题。
+经验教训：**在 init 成功后断言失败的用例，panic 会跳过 destroy，泄漏全局运行时**。测试体中的 `expect_err` 应包裹在 `init` 之前的准备阶段，或对已激活的 runtime 先 `destroy().await` 再断言失败。
 
-### 5. 建议方案
+### 5. 修复
 
-1. **基线复核**：在 main `ad2046d3` 上并行重跑一次，确认挂起是否预先存在（预期是，PR-1/PR-2 不触碰锁序）。
-2. **定位**：挂起时采集线程栈（Windows 上可用 procdump / Process Explorer，或 `RUST_LOG=trace`），确定持锁用例与获取顺序。
-3. **修复方向**：统一所有测试的全局锁获取顺序——`parse_config`/`plugin::init` 路径已保证 "serialization permit → lifecycle"；需要检查持 `global_api_test_guard` 的用例是否可能在持有 api 护栏期间间接获取 lifecycle 锁，反之亦然。必要时合并两把测试护栏为一把。
-4. **临时缓解**：CI 中该测试文件以 `--test-threads=1` 运行（全包仅 29s，代价可忽略），或拆分为互不共享全局状态的多个测试二进制。
+- PR-1 提交 `7e9f7d13`：将 `test_geo_provider_failure_paths_are_reported` 的第一个子场景改为断言降级语义（init 成功 + `degraded_files` 上报 + 匹配为空 + 显式 `registry.destroy()`），合入 PR-2 分支（`141ccd18`）后并行挂起消失。
+- 类型不匹配等仍致命的子场景保持不变。
 
 ### 6. 关联
 
-- 相关代码：`src/plugin/registry/runtime.rs`（`test_runtime_lock`、`enable_runtime_test_serialization`）、`src/api/global.rs`（`global_api_test_guard`）、`tests/plugin_integration.rs`（`parse_config`）、`src/infra/observability/metrics.rs`（全局注册表）。
-- 发现于：PR-1/PR-2（rule-file 降级与 degraded API）的集成验证；修复不属于这两个 PR。
-- 与 ISSUE-003 同类：测试全局状态竞争。
+- 相关代码：`tests/plugin_integration.rs`（`test_geo_provider_failure_paths_are_reported`、`parse_config`）、`src/plugin/registry/runtime.rs`（`StartupSession`、测试串行化）。
+- 发现于：PR-1/PR-2（rule-file 降级与 degraded API）的集成验证。
+- 与 ISSUE-003 无关（那是 dynamic_domain_set 的全局 API 路由竞争，仍待处理）。
+
+### 7. 状态
+
+已修复。若后续再出现无 FAILED 前导的并行挂起，再按原假设（锁序）重启排查；届时先采集线程栈。
