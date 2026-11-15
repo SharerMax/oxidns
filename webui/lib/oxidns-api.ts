@@ -108,7 +108,15 @@ export interface ProviderReloadResponse {
   ok: boolean;
   action: "reload_provider";
   provider: string;
-  status: "reloaded";
+  status: "reloaded" | "degraded";
+  degraded_files: string[];
+}
+
+export interface ProviderStatusResponse {
+  ok: boolean;
+  provider: string;
+  status: "running" | "degraded";
+  degraded_files: string[];
 }
 
 export class ProviderReloadBusyError extends Error {}
@@ -629,6 +637,19 @@ export async function reloadProvider(
     }
     throw error;
   }
+}
+
+export async function fetchProviderStatus(
+  tag: string,
+): Promise<ProviderStatusResponse> {
+  const response = await fetch(
+    apiUrl(`/plugins/${encodeURIComponent(tag)}/status`),
+    {
+      method: "GET",
+      headers: apiHeaders(),
+    },
+  );
+  return readJsonResponse<ProviderStatusResponse>(response);
 }
 
 export async function runCronJob(

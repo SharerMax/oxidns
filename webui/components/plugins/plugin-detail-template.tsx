@@ -48,6 +48,7 @@ import { PluginDeleteButton } from "./plugin-delete-button";
 import type { PluginReferenceImpact } from "@/lib/plugin-reference-operations";
 import { MatcherRuntimeControl } from "./matcher-runtime-control";
 import { ProviderRuntimeControl } from "./provider-runtime-control";
+import { ProviderDegradedNotice } from "./provider-degraded-notice";
 
 export function PluginDetailTemplate({
   plugin,
@@ -325,6 +326,9 @@ export function PluginDetailTemplate({
           ) : null}
           {plugin.type === "provider" ? (
             <ProviderRuntimeControl plugin={plugin} mode="detail" />
+          ) : null}
+          {plugin.type === "provider" ? (
+            <ProviderDegradedNotice plugin={plugin} />
           ) : null}
 
           <div className="mt-4 flex flex-wrap items-center gap-2">

@@ -47,6 +47,9 @@ export function PluginCardTemplate({
   const matcherControl = useAppStore((s) =>
     plugin.type === "matcher" ? s.matcherControls[plugin.name] : undefined,
   );
+  const providerState = useAppStore((s) =>
+    plugin.type === "provider" ? s.providerStates[plugin.name] : undefined,
+  );
   const buildInfo = useAppStore((s) => s.buildInfo);
   const cardMetrics = selectCardMetrics(
     series,
@@ -67,6 +70,9 @@ export function PluginCardTemplate({
   const matcherAlwaysTrue =
     matcherControl?.availability === "ready" &&
     matcherControl.mode === "always_true";
+  const providerDegraded =
+    providerState?.availability === "ready" &&
+    providerState.status === "degraded";
   const resolvedIcon =
     icon ??
     (definition
@@ -89,6 +95,8 @@ export function PluginCardTemplate({
           "border-warning/40 bg-warning/5 hover:border-warning/60",
         matcherAlwaysTrue &&
           "border-destructive/40 bg-destructive/5 hover:border-destructive/60",
+        providerDegraded &&
+          "border-warning/40 bg-warning/5 hover:border-warning/60",
         !supported && "border-dashed opacity-70",
       )}
       aria-disabled={!supported}
@@ -146,6 +154,28 @@ export function PluginCardTemplate({
               >
                 {t(WEBUI.common.notCompiled)}
               </Badge>
+            )}
+            {providerDegraded && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge
+                    variant="outline"
+                    className="h-5 rounded-md border-warning/50 bg-warning/10 px-1.5 py-0 text-xs leading-none text-warning"
+                  >
+                    {t(WEBUI.plugins.providerDegradedBadge)}
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="max-w-xs">
+                  <p>{t(WEBUI.plugins.providerDegradedTooltip)}</p>
+                  {providerState?.degradedFiles.length ? (
+                    <ul className="mt-1 font-mono text-xs">
+                      {providerState.degradedFiles.map((file) => (
+                        <li key={file}>{file}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </TooltipContent>
+              </Tooltip>
             )}
           </div>
           {definition?.description && !compact && !children && (

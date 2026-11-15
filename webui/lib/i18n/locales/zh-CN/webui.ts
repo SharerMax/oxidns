@@ -224,6 +224,12 @@ export const zhCNWebui = {
     providerReloadUnavailable: "离线模式下不可用",
     providerReloadTopologyHint:
       "该操作不会应用 YAML、tag 或依赖拓扑变更；这些变更仍需执行应用级 reload。",
+    providerDegradedBadge: "降级运行",
+    providerDegradedTooltip:
+      "部分规则文件缺失或不可读，这些文件中的规则当前未生效。文件就绪后可通过重新加载恢复。",
+    providerDegradedHint:
+      "该 provider 当前降级运行：以下规则文件未能加载，其中的规则未生效。文件就绪后重新加载即可恢复。",
+    providerDegradedFilesTitle: "未加载的规则文件",
   },
   pluginTypes: {
     server: "Server",

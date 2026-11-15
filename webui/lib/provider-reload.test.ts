@@ -7,7 +7,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   reconcileProviderReloads,
+  reconcileProviderStates,
   type ProviderReloadState,
+  type ProviderRuntimeState,
 } from "./provider-reload";
 import type { PluginInstance, PluginType } from "./types";
 
@@ -49,5 +51,38 @@ describe("provider reload state", () => {
         outcome: "idle",
       },
     });
+  });
+});
+
+describe("provider runtime state", () => {
+  it("keeps known states, adds loading providers, and removes stale tags", () => {
+    const degraded: ProviderRuntimeState = {
+      availability: "ready",
+      status: "degraded",
+      degradedFiles: ["./rules/missing.txt"],
+    };
+    const states = reconcileProviderStates(
+      [
+        plugin("domains", "provider"),
+        plugin("new_provider", "provider"),
+        plugin("exec", "executor"),
+      ],
+      { domains: degraded, removed: degraded },
+    );
+
+    expect(states).toEqual({
+      domains: degraded,
+      new_provider: {
+        availability: "loading",
+        status: "running",
+        degradedFiles: [],
+      },
+    });
+  });
+
+  it("returns an empty map when no providers are configured", () => {
+    expect(reconcileProviderStates([plugin("exec", "executor")], {})).toEqual(
+      {},
+    );
   });
 });
