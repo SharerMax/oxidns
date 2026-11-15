@@ -10,6 +10,10 @@ use thiserror::Error;
 use tokio::sync::Mutex;
 
 use crate::infra::error::DnsError;
+use crate::infra::observability::metrics::{
+    MetricLabel, MetricSample, MetricSink, MetricSource, register_metric_source,
+    unregister_metric_source,
+};
 use crate::plugin::provider::Provider;
 
 #[derive(Debug, Error)]
@@ -29,6 +33,35 @@ impl ProviderReloadError {
     }
 }
 
+/// Reports the degraded state of one provider as a gauge so operators can
+/// alert on "rules silently not in effect" instead of scraping logs.
+#[derive(Debug)]
+struct ProviderDegradedMetric {
+    tag: String,
+    provider: Arc<dyn Provider>,
+}
+
+impl MetricSource for ProviderDegradedMetric {
+    fn tag(&self) -> &str {
+        &self.tag
+    }
+
+    fn plugin_type(&self) -> &'static str {
+        "provider"
+    }
+
+    fn collect(&self, sink: &mut dyn MetricSink) {
+        let degraded_files = self.provider.degraded_files();
+        let labels = [MetricLabel::new("plugin_tag", self.tag.as_str())];
+        sink.emit(MetricSample::gauge(
+            "plugin_degraded",
+            "Whether the provider is serving with unloaded rule files (1 = degraded).",
+            &labels,
+            u64::from(!degraded_files.is_empty()),
+        ));
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct ProviderRuntimeControl {
     provider: Arc<dyn Provider>,
@@ -38,11 +71,22 @@ pub(crate) struct ProviderRuntimeControl {
 
 impl ProviderRuntimeControl {
     pub(crate) fn new(provider: Arc<dyn Provider>) -> Self {
+        // Same-tag registrations replace each other, so re-initialization
+        // never accumulates stale sources.
+        let _ = register_metric_source(Arc::new(ProviderDegradedMetric {
+            tag: provider.tag().to_owned(),
+            provider: provider.clone(),
+        }));
         Self {
             provider,
             reload_lock: Arc::new(Mutex::new(())),
             accepting_reloads: AtomicBool::new(true),
         }
+    }
+
+    /// Files that failed to load in the provider's last snapshot build.
+    pub(crate) fn degraded_files(&self) -> Vec<String> {
+        self.provider.degraded_files()
     }
 
     pub(crate) async fn reload(&self) -> Result<(), ProviderReloadError> {
@@ -76,6 +120,7 @@ impl ProviderRuntimeControl {
     /// snapshot build cannot overlap initialization of its replacement.
     pub(crate) async fn drain(&self) {
         self.accepting_reloads.store(false, Ordering::Release);
+        unregister_metric_source(self.provider.tag());
         let _guard = self.reload_lock.clone().lock_owned().await;
     }
 
