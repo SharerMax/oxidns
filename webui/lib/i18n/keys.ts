@@ -223,6 +223,10 @@ export const WEBUI = {
     providerReloadSkipped: "webui.plugins.providerReloadSkipped",
     providerReloadUnavailable: "webui.plugins.providerReloadUnavailable",
     providerReloadTopologyHint: "webui.plugins.providerReloadTopologyHint",
+    providerDegradedBadge: "webui.plugins.providerDegradedBadge",
+    providerDegradedTooltip: "webui.plugins.providerDegradedTooltip",
+    providerDegradedHint: "webui.plugins.providerDegradedHint",
+    providerDegradedFilesTitle: "webui.plugins.providerDegradedFilesTitle",
   },
   pluginTypes: {
     server: "webui.pluginTypes.server",
