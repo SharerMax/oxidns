@@ -1,6 +1,6 @@
 # PR:fix(cache): ECS scope validation, single-flight, and persistence hardening
 
-> **状态:已被拆分方案取代,勿直接使用。** 缓存系列已拆为四个可独立评审的子 PR(P1–P4),方案见 `pr-doc/pr-split-cache-hardening.md`;其中 P2(请求侧 ECS 剥离)已单独建分支 `fix/ecs-request-strip`,正文见 `pr-doc/pr-body-ecs-request-strip.md`。
+> **状态:已被拆分方案取代,勿直接使用。** 缓存系列已拆为四个可独立评审的子 PR(P1–P4),方案见 `pr-doc/pr-split-cache-hardening.md`;其中 P2(请求侧 ECS 剥离)已单独建分支 `fix/ecs-request-strip`,正文见 `pr-doc/pr-body/pr-body-ecs-request-strip.md`。
 > 来源分支 `fix/cache-hardening` 已删除(本地与 fork),提交以标签 `archive/cache-hardening` @ `770f51a0` 归档;其基线 `origin/release/v1.7.0` @ `871f8da3` 已被上游 #422(修复 #403)推进到 `56b7b10f`,直接用该分支建 PR 会重新引入缓存 dump 覆盖缺陷并与上游改动冲突。
 
 **目标分支**:svenshi/oxidns `release/v1.7.0`
@@ -13,7 +13,7 @@ gh pr create \
   --head SharerMax:fix/cache-hardening \
   --base release/v1.7.0 \
   --title "fix(cache): ECS scope validation, single-flight, and persistence hardening" \
-  --body-file pr-doc/pr-body-cache-hardening.md
+  --body-file pr-doc/pr-body/pr-body-cache-hardening.md
 ```
 
 ---

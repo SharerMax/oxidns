@@ -10,7 +10,7 @@ gh pr create \
   --head SharerMax:refactor/edns0-option-code \
   --base release/v1.7.0 \
   --title "refactor(proto): add EdnsOption::code and reuse it in forward_edns0opt" \
-  --body-file pr-doc/pr-body-edns0-option-code.md
+  --body-file pr-doc/pr-body/pr-body-edns0-option-code.md
 ```
 
 ---

@@ -10,7 +10,7 @@ gh pr create \
   --head SharerMax:feat/edns0opt-matcher \
   --base main \
   --title "feat(plugin): add edns0opt matcher for EDNS0 option presence" \
-  --body-file pr-doc/pr-body-edns0opt-matcher.md
+  --body-file pr-doc/pr-body/pr-body-edns0opt-matcher.md
 ```
 
 ---

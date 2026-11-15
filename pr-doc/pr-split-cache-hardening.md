@@ -89,7 +89,7 @@
 | 提交 | `06b27038`(cherry-pick of `44c39246`,patch-id `f7ed03018179b3c2fc8d8a6b34358c82c2ea8420` 一致)、`c6537b87`(插件参考文档中/英同步) |
 | 差异 | 3 文件,+118/−9:`src/plugin/executor/ecs_handler.rs`、`website/docs/plugin-reference/executor/resolution.mdx`、英文 i18n 对应文件 |
 | 校验 | `cargo check --all-targets` 通过;`cargo test --lib ecs_handler` 9 passed;`cargo test` 1391 passed / 0 failed / 4 ignored;`cargo +nightly fmt --all --check` 通过;clippy 在 Windows 命中上游既有 lint `src/infra/network/dial.rs:483`(`needless_bool`,仅 `cfg(not(unix))` 分支,与本改动无关) |
-| PR 正文 | `pr-doc/pr-body-ecs-request-strip.md`(保留作历史参考) |
+| PR 正文 | `pr-doc/pr-body/pr-body-ecs-request-strip.md`(保留作历史参考) |
 | PR 状态 | **不提交**。上游 PR #426(`afc23736`)已在 `forward: false` 时于链前剥离客户端 ECS,并在插件文档中明确保留链后请求 ECS;全量剥离与之语义相反 |
 
 窄化版(替代方案,只清理**内部合成**的 ECS):
@@ -102,7 +102,7 @@
 | 差异 | 4 文件,+241/−36:`src/plugin/executor/ecs_handler.rs`、`tests/plugin_integration.rs`、插件参考中/英 |
 | 语义 | 只在回程阶段删除**本插件合成**的请求 ECS;客户端 ECS(`forward: true` 转发 / `forward: false` 链前已删)与下游替换值都不动;链中语义不变 |
 | 校验 | `cargo check --all-targets` 0 warning;`cargo test --lib ecs_handler` 14 passed;`cargo test` 1410 passed / 0 failed / 4 ignored;`cargo +nightly fmt --all --check` 通过;clippy 在 Windows 命中上游既有 lint `src/infra/network/dial.rs:483` |
-| PR 正文 | `pr-doc/pr-body-ecs-synthesized-strip.md` |
+| PR 正文 | `pr-doc/pr-body/pr-body-ecs-synthesized-strip.md` |
 | PR 状态 | 未创建(`gh` 未登录) |
 
 ### 基线推进带来的影响(2026-11-11)
