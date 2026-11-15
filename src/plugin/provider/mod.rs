@@ -292,6 +292,35 @@ mod tests {
         assert_eq!(payload["ok"], true);
         assert_eq!(payload["action"], "reload_provider");
         assert_eq!(payload["provider"], "reloadable");
+        assert_eq!(payload["status"], "reloaded");
+        assert_eq!(payload["degraded_files"], serde_json::json!([]));
+
+        let uri: Uri = format!("http://{listen}/api/plugins/reloadable/status")
+            .parse()
+            .expect("uri should parse");
+        let response = client
+            .request(
+                HttpRequest::builder()
+                    .method(Method::GET)
+                    .uri(uri)
+                    .body(Full::new(bytes::Bytes::new()))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body should collect")
+            .to_bytes();
+        let payload = serde_json::from_slice::<serde_json::Value>(&body)
+            .expect("response should be valid json");
+        assert_eq!(payload["ok"], true);
+        assert_eq!(payload["provider"], "reloadable");
+        assert_eq!(payload["status"], "running");
+        assert_eq!(payload["degraded_files"], serde_json::json!([]));
 
         let uri: Uri = format!("http://{listen}/api/plugins/match_qname/status")
             .parse()
