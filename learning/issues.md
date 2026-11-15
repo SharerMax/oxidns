@@ -271,6 +271,16 @@ cargo test --lib plugin::provider::dynamic_domain_set   # 单独跑则稳定通�
 
 基线核查：`git stash` 后在 `ad2046d3` 上同样失败（66 passed / 3 failed，失败用例集与带改动时不同），确认与 `feat/provider-degraded-startup` 无关。
 
+**2026-11-15 基线复现记录**（`learning-doc` 分支，代码 = main `ad2046d3`，`cargo test --lib plugin::provider` 默认并行连跑 3 次，**3/3 复现**）：
+
+| 运行 | 失败用例 | 结果 |
+|---|---|---|
+| RUN 1 | appends_and_matches、async_append_is_ordered_before_clear、rule_api_adds_removes_and_clears | 57 passed / 3 failed |
+| RUN 2 | async_append_is_ordered_before_clear | 59 passed / 1 failed |
+| RUN 3 | rule_api_adds_removes_and_clears、sync_append_flushes_without_batch_or_tick、appends_and_matches | 57 passed / 3 failed |
+
+三次报错均为 `backend should start: Plugin("duplicate API route registered: GET /plugins/learned/rules")`，失败用例集每次漂移；单过滤器 `plugin::provider::dynamic_domain_set` 重跑则稳定通过（13 passed）。复现稳定，与负载/时序相关。
+
 ### 5. 建议方案
 
 **最小修（推荐）**：`dynamic_domain_set/tests.rs` 的每个用例开头加 `let _guard = crate::api::global_api_test_guard().await;`，与 `plugin/registry/tests.rs`、`api/tests.rs` 的既有约定对齐。代价是这批用例串行，但它们都是轻量文件用例，串行开销可忽略。
