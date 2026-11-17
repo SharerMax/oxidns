@@ -30,9 +30,9 @@
 | 处置方式 | **直接丢弃**,不降权、不新增 disposition | 保留段应答不具备可用价值;降权在"无更好结果"时仍会把 `0.0.0.0` 交给客户端 |
 | 单上游 | 同样丢弃,`forward` 返回错误 | 单上游配置下污染应答同样无法使用;错误比 `0.0.0.0` 更容易被客户端重试或由 `fallback` 接管 |
 | 配置位置 | forward 级 `bogus_answer_ips` | 与上游 tag 解耦,一份规则覆盖该 forward 的全部上游 |
-| 配置形态 | 与 `resp_ip` 的 `args` 同源规则列表 | 复用既有解析与 provider 依赖机制,用户无需学第二套语法 |
+| 配置形态 | 标准 IP 规则列表(字符串或列表,支持 IP/CIDR/`$ip_set`/`&file`) | 复用既有解析与 provider 依赖机制,用户无需学第二套语法 |
 | 默认值 | 不配置 = 关闭(opt-in) | `0.0.0.0/8` 也是部分上游的广告拦截应答;默认开启会静默翻转"拦截上游 + 普通上游"的既有裁决 |
-| 判定范围 | answer 区任一 A/AAAA 命中即整条丢弃 | 与 `resp_ip` 的 `Message::has_answer_ip` 语义一致;污染报文通常只有一条地址 |
+| 判定范围 | answer 区任一 A/AAAA 命中即整条丢弃 | 通过 `Message::has_answer_ip` 只检查 answer 区;污染报文通常只有一条地址 |
 | `fastest` | 同样过滤 | 丢弃发生在选择之前,`fastest` 也不应把污染应答当"第一个成功响应" |
 | 计量 | 插件级 `forward_bogus_answer_total` | 足以观测污染规模;per-upstream 归属留作后续增量 |
 
@@ -64,14 +64,14 @@
 ```
 
 - 类型:`string | array<string>`;必填:否。
-- 支持元素与 `resp_ip` 的 `args` 完全一致:
+- 支持元素:
   - 单个 IP
   - CIDR
   - `$ip_set` 引用
   - `&规则文件`(空行与 `#` 注释由 `TextSource` 处理)
   - 字符串内可再按逗号/空白拆成多条
 - 缺省 → 关闭;字段存在但解析后既无内联规则也无 `$tag` → 启动失败,
-  文案对齐 `resp_ip` 的 "requires at least one IP rule or ip_set tag"。
+  文案为 "forward plugin 'bogus_answer_ips' requires at least one IP rule or ip_set tag"。
 - 非法 CIDR / 缺失规则文件 / 不存在的 provider tag → 启动失败,错误信息带
   `bogus_answer_ips` 字段名与元素索引。
 - 单上游与多上游都解析、都生效;`quick_setup` 不提供该配置。
@@ -91,21 +91,16 @@ pub(super) struct BogusAnswerFilter {
 
 impl BogusAnswerFilter {
     /// 启动期解析 inline / `&file` 规则;`None` 返回禁用态。
-    pub(super) fn from_args(value: Option<&serde_yaml_ng::Value>) -> Result<Self>;
+    pub(super) fn from_value(value: Option<&serde_yaml_ng::Value>) -> Result<Self>;
     /// init 阶段解析 `$tag`,并校验 supports_ip_matching()。
-    pub(super) fn resolve_providers(
-        &mut self,
-        context: &PluginInitContext<'_>,
-        tag: &str,
-    ) -> Result<()>;
-    pub(super) fn is_enabled(&self) -> bool;
+    pub(super) fn init(&mut self, context: &PluginInitContext<'_>, tag: &str) -> Result<()>;
     #[inline]
     pub(super) fn is_bogus(&self, response: &Message) -> bool;
 }
 ```
 
 - `is_bogus`:`response.has_answer_ip(|ip| ip_rules.contains_ip(ip) || ip_sets.iter().any(|s| s.contains_ip(ip)))`,
-  与 `src/plugin/matcher/resp_ip.rs` 同一条判定路径。
+  只检查 answer 区 A/AAAA,不修改报文。
 - `IpPrefixMatcher` 在 `create()` 阶段 `finalize_compact()`,热路径只做整数比较。
 - 复用 `src/plugin/matcher/rules/`(`reload_provider.rs` 已有跨类目复用先例):
   - `parse_ip_rules_and_set_tags`、`split_rule_sources`、`provider_tags_from_rules`
@@ -245,7 +240,7 @@ forward_bogus_answer_total{plugin_tag}  "Total upstream responses discarded beca
   - 补充 `fallback` 与 `0.0.0.0` 广告拦截的说明。
 - WebUI:
   - `webui/lib/plugin-definitions/executor.ts`:用 `stringArrayField` +
-    `providerReferenceArrayItem` / `inputArrayItem`,与 `resp_ip` 控件一致,`advanced: true`;
+    `providerReferenceArrayItem` / `inputArrayItem`,`advanced: true`;
   - `webui/lib/plugin-definitions-advanced.test.ts` 的 `EXPECTED_ADVANCED_FIELDS` 同步;
   - `webui/lib/i18n/locales/{zh-CN,en-US}/{plugin-defined,docs}.ts` 补充字段与文档文案;
   - forward 指标标签补充 `forward_bogus_answer_total`。
