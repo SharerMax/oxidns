@@ -34,7 +34,7 @@
 | 默认值 | 不配置 = 关闭(opt-in) | `0.0.0.0/8` 也是部分上游的广告拦截应答;默认开启会静默翻转"拦截上游 + 普通上游"的既有裁决 |
 | 判定范围 | answer 区任一 A/AAAA 命中即整条丢弃 | 通过 `Message::has_answer_ip` 只检查 answer 区;污染报文通常只有一条地址 |
 | `fastest` | 同样过滤 | 丢弃发生在选择之前,`fastest` 也不应把污染应答当"第一个成功响应" |
-| 计量 | 插件级 `forward_bogus_answer_total` | 足以观测污染规模;per-upstream 归属留作后续增量 |
+| 计量 | 插件级 `forward_bogus_answer_total` + 上游级 `forward_upstream_bogus_total{upstream}` | 既能看总量,也能定位持续返回污染地址的上游 |
 
 **被拒方案**
 
@@ -166,9 +166,22 @@ pub(super) struct SelectionOutcome {
 forward_bogus_answer_total{plugin_tag}  "Total upstream responses discarded because an answer address matched bogus_answer_ips."
 ```
 
-- 多上游:`outcome.bogus_dropped` 累加;
-- 单上游:每次命中 +1;
+新增上游级 counter(标签与既有 `forward_upstream_*` 一致,启动期固定、低基数):
+
+```
+forward_upstream_bogus_total{plugin_tag, upstream}  "Total responses from this upstream discarded because an answer address matched bogus_answer_ips."
+```
+
+- 多上游:`outcome.bogus_dropped` 累加插件级计数;子任务把 `selected_idx` 随查询结果返回,`SelectionState::discard_if_bogus(idx, ...)` 同时按 `idx` 记上游级计数;
+- 单上游:每次命中插件级 +1,并按 `idx = 0` 记上游级 +1;
+- 判定仍在 selection 入口收口,不下移到并发子任务:`fastest` / `balanced` / `prefer_positive` / `consensus` 共享同一过滤语义,不污染上游成功/错误指标,也不改变 `completed` 收敛;
 - WebUI `plugin-definitions/executor.ts` 的 `metricLabels` / `metricHelp` 同步。
+
+### 3.5.1 诊断日志
+
+- 逐条丢弃(并发路径)用 `debug!`,带插件 tag、上游索引、qname、qtype、命中的 answer IP;默认 info 级别不输出,需要排查时调低日志级别即可看到每条被丢弃的地址。
+- 请求真正失败时保留 `warn!`:单上游命中,以及多上游全部命中时的汇总错误。若全 bogus,汇总文案带丢弃数量、qname、qtype 与首个命中的 answer IP;单上游错误同样带这些信息。
+- qname/qtype 取自 `request.first_question()`(`normalized()` 不带尾部点),缺失时为 `<none>`;只在丢弃/失败分支计算,不进成功热路径。
 
 ### 3.6 缓存与报文语义
 
@@ -223,8 +236,10 @@ forward_bogus_answer_total{plugin_tag}  "Total upstream responses discarded beca
 - 多上游 `balanced`:0ms bogus + 20ms 真实 A → 真实 A;
 - 多上游 `fastest`:0ms bogus + 20ms 真实 A → 真实 A;
 - 多上游 `consensus`:bogus + `NXDOMAIN` → `NXDOMAIN`,且无负共识提前返回;
-- 多上游全 bogus → `Err`,错误信息包含 bogus 与丢弃数量;
-- `forward_bogus_answer_total` 计数正确。
+- 多上游全 bogus → `Err`,错误信息包含 bogus 与丢弃数量、qname/qtype 与命中地址;
+- `forward_bogus_answer_total` 计数正确,且按上游的 `forward_upstream_bogus_total` 归属正确(快 bogus + 慢真实:索引 0 记 1,索引 1 记 0;全部 bogus:各记 1);
+- `bogus_answer_ip()` 返回 answer 区首个命中地址,未命中返回 `None`;
+- 指标导出测试:验证 `forward_upstream_bogus_total` 的 `upstream` 标签与数值。
 
 集成(可选):
 
@@ -243,7 +258,8 @@ forward_bogus_answer_total{plugin_tag}  "Total upstream responses discarded beca
     `providerReferenceArrayItem` / `inputArrayItem`,`advanced: true`;
   - `webui/lib/plugin-definitions-advanced.test.ts` 的 `EXPECTED_ADVANCED_FIELDS` 同步;
   - `webui/lib/i18n/locales/{zh-CN,en-US}/{plugin-defined,docs}.ts` 补充字段与文档文案;
-  - forward 指标标签补充 `forward_bogus_answer_total`。
+  - forward 指标标签补充 `forward_bogus_answer_total` 与 `forward_upstream_bogus_total`;
+  - 中英 `resolution.mdx` 的 per-upstream 指标列表同步补充。
 - `README*.md`、`config*.yaml` 不改(默认配置与能力摘要未变)。
 - Release note call out:opt-in 新字段;启用后单上游命中即 SERVFAIL;与上游
   `0.0.0.0` 拦截语义的冲突。
@@ -255,8 +271,7 @@ forward_bogus_answer_total{plugin_tag}  "Total upstream responses discarded beca
 - **单上游直接失败**:可用的替代行为只有 SERVFAIL;文档引导配合 `fallback`。
 - **随机境外假 IP**:静态不可判别,本设计不处理;用户可自行把已知伪造前缀加入
   `bogus_answer_ips`(规则列表支持任意 CIDR / provider 列表)。
-- **指标无上游归属**:当前只统计插件级丢弃总数;若后续需要定位具体上游,
-  可把判定下移到 `concurrent.rs` 子任务并新增 `forward_upstream_bogus_total`。
+- **指标上游归属**:已通过 `forward_upstream_bogus_total{upstream}` 补齐,可在不改动选择逻辑的前提下定位持续返回污染地址的上游;判定仍集中在 selection 入口。
 - **负缓存语义**:丢弃不产生 response,不会把污染结果写入负缓存;不会改变
   现有 NXDOMAIN/NODATA 缓存行为。
 
@@ -267,8 +282,10 @@ forward_bogus_answer_total{plugin_tag}  "Total upstream responses discarded beca
 1. `feat(forward): add bogus_answer_ips rule parsing and provider deps`
 2. `feat(forward): drop bogus upstream answers before selection`
 3. `feat(forward): apply bogus filtering to single-upstream forwarding`
-4. `feat(forward): count discarded bogus answers`
+4. `feat(forward): count discarded bogus answers`(插件级指标)
 5. `docs(forward): document bogus_answer_ips`(含 WebUI 定义与 locale)
+6. `feat(forward): add per-upstream bogus answer metric`(上游级指标)
+7. `log(forward): enrich bogus answer drop diagnostics`(qname/qtype/命中地址;逐条 drop 用 `debug!`)
 
 ## 9. 回退
 

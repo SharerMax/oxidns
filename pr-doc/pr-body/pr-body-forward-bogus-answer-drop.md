@@ -25,7 +25,8 @@
 - `selection.rs`:`SelectionState` 在 `record_response` 之前先做 bogus 判定,命中不计候选、不计负向投票、不启动 100ms 负应答 grace;`fastest` 也跳过。`SelectionOutcome` 带 `bogus_dropped`,供调用方计数与生成错误文案。
 - `single.rs` / `concurrent.rs`:两条路径共用同一个过滤器;单上游命中记录上游成功延迟、插件错误和 bogus 指标后返回错误;多上游全部命中时返回 `all responses contained bogus addresses (<n> dropped)`。
 - `factory.rs`:构建一次过滤器注入两条路径,并通过 `get_dependency_specs` 声明 `args.bogus_answer_ips[i]` → provider 的依赖边,保证启动图与类型校验一致。
-- `metrics.rs`:新增插件级 counter `forward_bogus_answer_total{plugin_tag}`。
+- `metrics.rs`:新增插件级 counter `forward_bogus_answer_total{plugin_tag}` 与上游级 counter `forward_upstream_bogus_total{plugin_tag, upstream}`(标签与既有 `forward_upstream_*` 一致)。并发子任务把 `selected_idx` 随查询结果返回,`SelectionState` 在丢弃点按上游索引记数;单上游按 `idx = 0` 记数。判定不下移到子任务,选择语义与上游成功/错误指标保持不变。
+- 诊断日志:逐条丢弃用 `debug!`(带插件 tag、上游索引、qname、qtype、命中的 answer IP),只在失败时保留 `warn!`——单上游命中,以及多上游全 bogus 的汇总错误;错误文案带丢弃数量、qname/qtype 与命中地址,qname/qtype 取自 `first_question()`,缺失时为 `<none>`,且只在失败分支计算。
 - 规则解析复用 `src/plugin/matcher/rules/` 的 `parse_ip_rules_and_set_tags` 等既有能力,并把 `parse_rule_list_value` 参数化为带字段名的 `parse_rule_list`,错误信息带 `bogus_answer_ips` 与元素索引。
 
 随机境外假 IP 静态不可判别,不在本 PR 范围;用户可把自己已知的伪造前缀加入规则列表。
@@ -53,7 +54,7 @@
 ## 测试
 
 - `src/plugin/executor/forward/bogus.rs`:内联规则、字符串/列表拆分、规则文件、answer 区限定、任一地址命中、provider 命中与能力校验、非法 CIDR、空规则、非字符串元素、依赖提取。
-- `src/plugin/executor/forward/tests.rs`:单上游命中丢弃 / 未配置保留;多上游 `balanced`、`fastest`、`consensus` 跳过 bogus;全部 bogus 返回带丢弃数量的错误;配置解析与空规则校验;指标计数。
+- `src/plugin/executor/forward/tests.rs`:单上游命中丢弃 / 未配置保留;多上游 `balanced`、`fastest`、`consensus` 跳过 bogus;全部 bogus 返回带丢弃数量、qname/qtype 与命中地址的错误;配置解析与空规则校验;插件级与上游级指标计数(快 bogus + 慢真实、全部 bogus、单上游各场景)。`metrics.rs` 指标导出测试验证 `forward_upstream_bogus_total` 的 `upstream` 标签与数值。
 - `tests/plugin_integration.rs::test_forward_drops_provider_bogus_answer_and_falls_back`:真实 UDP 上游 + `ip_set` provider,主分支返回 `0.0.0.0` 被丢弃后由备用分支返回真实地址。
 
 已运行的命令:
@@ -73,6 +74,6 @@ npm run lint        # webui
 
 ## 文档跟进
 
-- 中英 `website/docs/plugin-reference/executor/resolution.mdx` 增加字段说明、选择策略与 `fallback` / `0.0.0.0` 拦截冲突提示,并补充新指标。
+- 中英 `website/docs/plugin-reference/executor/resolution.mdx` 增加字段说明、选择策略与 `fallback` / `0.0.0.0` 拦截冲突提示,并补充插件级与上游级两项新指标。
 - WebUI forward 卡片增加 `bogus_answer_ips` 高级字段与规则文件 / provider 引用选择器,同步中英 locale 与插件字段文档、指标标签。
 - README 与 `config*.yaml` 不改:默认配置与能力摘要未变。
