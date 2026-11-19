@@ -12,6 +12,7 @@
 | ISSUE-002 | 重载失败回滚时缓存 dump 被候选实例覆盖 | 高 | 已修复（上游） |
 | ISSUE-003 | dynamic_domain_set 测试并行运行时全局 API 路由竞争 | 中 | 待处理 |
 | ISSUE-004 | 集成测试并行运行时挂起（过时失败用例泄漏运行时所致） | 中 | 已定位并修复（随 PR-1 `7e9f7d13`） |
+| ISSUE-005 | `task_center_restarts_scheduler_after_runtime_replacement` 偶发 Unavailable 导致 CI 失败 | 低 | 待处理（既有 flake，与 forward 改动无关） |
 
 ---
 
@@ -355,3 +356,56 @@ cargo test --test plugin_integration -- --test-threads=1   # 串行：也会失�
 ### 7. 状态
 
 已修复。若后续再出现无 FAILED 前导的并行挂起，再按原假设（锁序）重启排查；届时先采集线程栈。
+
+---
+
+## ISSUE-005 `task_center_restarts_scheduler_after_runtime_replacement` 偶发 Unavailable 导致 CI 失败
+
+**级别**：低（不影响运行时与请求路径；仅测试时序敏感，CI 偶发红）
+**发现方式**：`feat/forward-bogus-answers` 的 CI job "Test bundles (minimal / standard)" 报该用例 FAILED；本地无法复现。
+**状态**：待处理（既有 flake，已确认与本次 forward 改动无关）
+
+### 1. 现象
+
+CI（GitHub Actions，Linux）在 minimal / standard bundle 的 `cargo test --lib` 中：
+
+```
+---- infra::task::tests::task_center_restarts_scheduler_after_runtime_replacement stdout ----
+thread '...' panicked at src/infra/task.rs:1222:22:
+expected started outcome, got Unavailable
+stack backtrace:
+   ... started_run_id (src/infra/task.rs:1222)
+   ... task_center_restarts_scheduler_after_runtime_replacement::{closure#1} (src/infra/task.rs:2378)
+test result: FAILED. 799 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.82s
+```
+
+### 2. 取证（含 main 基线与本地 bundle 复核）
+
+- **改动无关性**：`git diff main -- src/infra/task.rs` 为空。forward 改动只在 `src/plugin/executor/forward/*`、`src/plugin/matcher/rules/{config,mod}.rs`、`webui/*`、`website/*`，不触碰 scheduler / runtime / task 机制。
+- **本地 bundle 复核**：minimal `cargo test --no-default-features --features minimal --lib` 连跑 3 次（801 passed / 0 failed）；standard 连跑 3 次（1180 passed / 0 failed）；单独重复该用例 5 次均通过——本地 Windows 无法复现。
+- **历史**：该文件最近相关提交 `2ac5c5ee fix(tests): improve scheduler yield handling for slower platforms`，说明此测试本就因时序敏感被专门修过一次（现有 `wait_until` 里加了 1ms sleep 帮助较慢平台的线程唤醒）。
+- 结论：CI Linux 偶发的 scheduler 重建时序问题，属既有 flake，非本次改动引入。
+
+### 3. 根因
+
+测试流程：`TaskCenter::new()` 在第一个 runtime 里创建 → drop 第一个 runtime → 在第二个 runtime 里 `spawn_fixed` 后立即 `handle.trigger()`（`src/infra/task.rs:2354-2385`）。
+
+- `ManagedTaskHandle::trigger()`（`task.rs:614-624`）在 `try_send` 失败或 oneshot 关闭时返回 `TriggerOutcome::Unavailable`；scheduler 在 runtime 替换后尚未完成重启时即处于该状态。
+- 测试用 `started_run_id()`（`task.rs:1219-1224`）对 trigger 结果直接断言，拿到 `Unavailable` 就 `panic!("expected started outcome, got {other:?}")`，**没有重试**。
+- 本地平台调度足够快，trigger 到达时 scheduler 已就绪；CI 较慢时偶发落在这个窗口。
+
+### 4. 影响与复现
+
+- 影响：仅 CI 偶发红，阻塞质量门；线上 runtime 行为不受影响。
+- 复现：在负载较高 / 调度较慢的 Linux runner 上运行 `cargo test --locked --no-default-features --features minimal --verbose`；本地单次或重复运行通常通过，难以稳定复现。
+
+### 5. 建议方案
+
+- 首选：直接 rerun 该 CI job（flake 通常重跑即过）。
+- 根治（单独改动，不并入 forward PR）：在 `task_center_restarts_scheduler_after_runtime_replacement` 中，对 `handle.trigger()` 返回 `Unavailable` 的情况加有限次等待重试（复用现有 `wait_until` 风格），再断言 `Started { run_id: 1 }`；不要改 `ManagedTaskHandle::trigger()` 的生产语义。
+
+### 6. 关联
+
+- 相关代码：`src/infra/task.rs`（`ManagedTaskHandle::trigger`、`started_run_id`、该测试用例）、`.github/workflows/rust-ci.yml`（`test-bundles` job，minimal / standard）。
+- 发现于：PR「forward 丢弃虚假地址应答（issue #441）」的 CI。
+- 与 ISSUE-003 / ISSUE-004 无关（分别为全局 API 路由竞争与过时失败用例泄漏运行时）。
