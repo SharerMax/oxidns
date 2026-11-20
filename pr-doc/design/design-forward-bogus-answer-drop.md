@@ -131,6 +131,10 @@ pub(super) struct SelectionOutcome {
 - 全部已启动上游都被丢弃时,`selected == None` 且无其他错误:
   `concurrent.rs` 返回
   `forward plugin '<tag>' failed across all concurrent upstreams: all responses contained bogus addresses (<n> dropped)`。
+- 请求失败但 `last_error` 与 bogus 丢弃并存(例如部分上游 bogus、另一上游超时):
+  `last_error` 仍是主因,但失败文案追加
+  `; also dropped <n> bogus answer(s) for qname <qname> qtype <qtype> answer <ip>`,
+  避免默认 warn 只显示传输错误而隐藏污染参与。(仅在失败分支构造,不影响成功热路径。)
 - 现有排名、负应答 grace、consensus 计票逻辑均不改动。
 
 ### 3.3 单上游(`forward/single.rs`)
@@ -180,7 +184,7 @@ forward_upstream_bogus_total{plugin_tag, upstream}  "Total responses from this u
 ### 3.5.1 诊断日志
 
 - 逐条丢弃(并发路径)用 `debug!`,带插件 tag、上游索引、qname、qtype、命中的 answer IP;默认 info 级别不输出,需要排查时调低日志级别即可看到每条被丢弃的地址。qname/qtype 字符串在 `event_enabled!(Level::DEBUG)` 门控内构造,日志关闭时 Hot path 不承担这两次分配(与 `concurrent.rs` 既有的 debug 日志约定一致)。
-- 请求真正失败时保留 `warn!`:单上游命中,以及多上游全部命中时的汇总错误。若全 bogus,汇总文案带丢弃数量、qname、qtype 与首个命中的 answer IP;单上游错误同样带这些信息。
+- 请求真正失败时保留 `warn!`:单上游命中,以及多上游全部命中时的汇总错误。若全 bogus,汇总文案带丢弃数量、qname、qtype 与首个命中的 answer IP;单上游错误同样带这些信息。`last_error` 与 bogus 并存时,`last_error` 为主因并追加 bogus 摘要(见 §3.2)。
 - qname/qtype 取自 `request.first_question()`(`normalized()` 不带尾部点),缺失时为 `<none>`;只在丢弃/失败分支计算,不进成功热路径。
 
 ### 3.6 缓存与报文语义
@@ -204,6 +208,7 @@ forward_upstream_bogus_total{plugin_tag, upstream}  "Total responses from this u
 | 其余上游只有确定负应答 | 按现有规则返回负应答(`NXDOMAIN`/`NODATA` 压过被丢弃项) |
 | bogus + `NXDOMAIN` | 返回 `NXDOMAIN`(bogus 不参与排名,也不计入负共识) |
 | 所有已启动上游都命中 | `forward` 返回错误,客户端 SERVFAIL,`fallback` 可接管 |
+| 部分 bogus + 部分传输错误(无可用应答) | `forward` 返回错误,失败文案同时含传输错误与 bogus 丢弃摘要 |
 | 单上游命中 | `forward` 返回错误,无 response |
 | 未配置 `bogus_answer_ips` | 所有行为与现状完全一致 |
 
@@ -237,6 +242,7 @@ forward_upstream_bogus_total{plugin_tag, upstream}  "Total responses from this u
 - 多上游 `fastest`:0ms bogus + 20ms 真实 A → 真实 A;
 - 多上游 `consensus`:bogus + `NXDOMAIN` → `NXDOMAIN`,且无负共识提前返回;
 - 多上游全 bogus → `Err`,错误信息包含 bogus 与丢弃数量、qname/qtype 与命中地址;
+- 多上游部分 bogus + 部分传输错误 → `Err`,失败文案同时含传输错误与 `also dropped 1 bogus answer` 摘要;
 - `forward_bogus_answer_total` 计数正确,且按上游的 `forward_upstream_bogus_total` 归属正确(快 bogus + 慢真实:索引 0 记 1,索引 1 记 0;全部 bogus:各记 1);
 - `bogus_answer_ip()` 返回 answer 区首个命中地址,未命中返回 `None`;
 - 指标导出测试:验证 `forward_upstream_bogus_total` 的 `upstream` 标签与数值。
