@@ -71,7 +71,7 @@
   - `&规则文件`(空行与 `#` 注释由 `TextSource` 处理)
   - 字符串内可再按逗号/空白拆成多条
 - 缺省 → 关闭;字段存在但解析后既无内联规则也无 `$tag` → 启动失败,
-  文案为 "forward plugin 'bogus_answer_ips' requires at least one IP rule or ip_set tag"。
+  文案为 `forward plugin '<tag>' field 'bogus_answer_ips' requires at least one IP rule or ip_set tag`(tag 与字段名分列两个槽位,避免把字段名误读成插件 tag)。
 - 非法 CIDR / 缺失规则文件 / 不存在的 provider tag → 启动失败,错误信息带
   `bogus_answer_ips` 字段名与元素索引。
 - 单上游与多上游都解析、都生效;`quick_setup` 不提供该配置。
@@ -179,7 +179,7 @@ forward_upstream_bogus_total{plugin_tag, upstream}  "Total responses from this u
 
 ### 3.5.1 诊断日志
 
-- 逐条丢弃(并发路径)用 `debug!`,带插件 tag、上游索引、qname、qtype、命中的 answer IP;默认 info 级别不输出,需要排查时调低日志级别即可看到每条被丢弃的地址。
+- 逐条丢弃(并发路径)用 `debug!`,带插件 tag、上游索引、qname、qtype、命中的 answer IP;默认 info 级别不输出,需要排查时调低日志级别即可看到每条被丢弃的地址。qname/qtype 字符串在 `event_enabled!(Level::DEBUG)` 门控内构造,日志关闭时 Hot path 不承担这两次分配(与 `concurrent.rs` 既有的 debug 日志约定一致)。
 - 请求真正失败时保留 `warn!`:单上游命中,以及多上游全部命中时的汇总错误。若全 bogus,汇总文案带丢弃数量、qname、qtype 与首个命中的 answer IP;单上游错误同样带这些信息。
 - qname/qtype 取自 `request.first_question()`(`normalized()` 不带尾部点),缺失时为 `<none>`;只在丢弃/失败分支计算,不进成功热路径。
 
