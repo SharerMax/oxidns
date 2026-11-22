@@ -2,7 +2,7 @@
 
 状态:设计定稿,未实现
 需求来源:无(存储受限设备部署实践,来源为插件实现分析)
-基线:分支 `learning-doc` @ `5d7c93ac`(v1.7.1)
+基线:main @ `ad2046d3`(v1.7.1)
 范围:`src/plugin/executor/query_recorder/{mod,model,backend,store,capture,payload,api,tests,v2_tests}.rs`、`webui/lib/plugin-definitions/executor.ts`、WebUI locale、`website/docs/plugin-reference/executor/observability.mdx` 及英文 i18n
 取代:无(首版)
 
