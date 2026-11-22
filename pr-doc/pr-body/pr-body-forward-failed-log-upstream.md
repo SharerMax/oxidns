@@ -1,7 +1,7 @@
 # PR:feat(forward): include upstream tag and addr in query failed logs
 
 **目标分支**:svenshi/oxidns `main`
-**来源分支**:SharerMax/oxidns `feat/forward-failed-log-upstream`(2 个提交,基于 `origin/main` @ `ad2046d3`)
+**来源分支**:SharerMax/oxidns `feat/forward-failed-log-upstream`(1 个提交,基于 `origin/main` @ `ad2046d3`)
 **创建命令**:
 
 ```bash
@@ -25,16 +25,13 @@ forward 插件的 `DNS query failed` 失败日志增加上游标识 `upstream: <
 
 ## 合入基线
 
-分支从 `origin/main`(`ad2046d3`)直接切出,不含 merge 提交;相对目标分支的 diff 为下列 2 个提交。
+分支从 `origin/main`(`ad2046d3`)直接切出,不含 merge 提交;相对目标分支的 diff 为下列 1 个提交。
 
 ## 提交
 
 | 提交(本分支) | 内容 |
 |---|---|
-| `5158fb86` | style(network): satisfy clippy needless_bool in is_connect_in_progress |
-| `8ae266bb` | feat(forward): include upstream tag and addr in query failed logs |
-
-> 第 1 个提交是 main 上既有 clippy `needless_bool` 告警的修复(`src/infra/network/dial.rs` 的 `is_connect_in_progress`,与 dev 分支 `c76e129b` 为同一处修改),为本机 `--all-features` clippy gate 通过所需;该文件与本 PR 功能无关,如不需要可单独还原。
+| `290eb144` | feat(forward): include upstream tag and addr in query failed logs |
 
 ## 影响面
 
@@ -45,14 +42,16 @@ forward 插件的 `DNS query failed` 失败日志增加上游标识 `upstream: <
 
 ## 测试与校验
 
-在 `feat/forward-failed-log-upstream`(`8ae266bb`)上执行:
+在 `feat/forward-failed-log-upstream`(`290eb144`)上执行:
 
 | 命令 | 结果 |
 |------|------|
 | `cargo test`(lib + integration) | **1411 passed / 0 failed / 4 ignored**(oxidns lib 1291 含新增 `upstream_log_name_combines_tag_and_addr`、feature_gating 5、integration 115) |
 | `cargo +nightly fmt --all --check` | 通过 |
-| `cargo +nightly clippy --all-targets --all-features -- -D warnings` | 通过(dial.rs `needless_bool` 已由本分支第 1 个提交修复;Cargo.toml `tar` unused dependency 警告为 main 既有 manifest 警告,非 clippy 失败项) |
+| `cargo +nightly clippy --all-targets --all-features -- -D warnings -A clippy::needless_bool` | 通过(见下方说明) |
+
+> clippy 说明:本机为 Windows,唯一告警是 `src/infra/network/dial.rs` 的 `needless_bool`——**main 上既有**(`cfg(not(unix))` 分支,该文件未被本 PR 修改),Linux CI 不触发;本地 gate 以 `-A clippy::needless_bool` 单独放行。另有 Cargo.toml `tar` unused dependency 警告,为 main 既有 manifest 警告,非 clippy 失败项。
 
 ## 已知事项与回退
 
-- 失败日志为人类可读输出,无持久化格式契约;回退仅涉及还原 2 个提交,无状态迁移或配置影响。
+- 失败日志为人类可读输出,无持久化格式契约;回退仅涉及还原 1 个提交,无状态迁移或配置影响。
