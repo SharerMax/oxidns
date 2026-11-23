@@ -261,8 +261,8 @@ forward_upstream_bogus_total{plugin_tag, upstream}  "Total responses from this u
   - 补充 `fallback` 与 `0.0.0.0` 广告拦截的说明。
 - WebUI:
   - `webui/lib/plugin-definitions/executor.ts`:用 `stringArrayField` +
-    `providerReferenceArrayItem` / `inputArrayItem`,`advanced: true`;
-  - `webui/lib/plugin-definitions-advanced.test.ts` 的 `EXPECTED_ADVANCED_FIELDS` 同步;
+    `providerReferenceArrayItem` / `inputArrayItem`;按 `docs/ai/webui.md` 的约定,该字段属于规则数据且决定"整条应答是否被丢弃",是安全相关行为,**不放 advanced**,保持可见;
+  - `webui/lib/plugin-definitions-advanced.test.ts` 的 `EXPECTED_ADVANCED_FIELDS` 不含该字段;
   - `webui/lib/i18n/locales/{zh-CN,en-US}/{plugin-defined,docs}.ts` 补充字段与文档文案;
   - forward 指标标签补充 `forward_bogus_answer_total` 与 `forward_upstream_bogus_total`;
   - 中英 `resolution.mdx` 的 per-upstream 指标列表同步补充。

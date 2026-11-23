@@ -75,5 +75,5 @@ npm run lint        # webui
 ## 文档跟进
 
 - 中英 `website/docs/plugin-reference/executor/resolution.mdx` 增加字段说明、选择策略与 `fallback` / `0.0.0.0` 拦截冲突提示,并补充插件级与上游级两项新指标。
-- WebUI forward 卡片增加 `bogus_answer_ips` 高级字段与规则文件 / provider 引用选择器,同步中英 locale 与插件字段文档、指标标签。
+- WebUI forward 卡片增加 `bogus_answer_ips` 字段与规则文件 / provider 引用选择器,保持非 advanced 可见(规则数据与安全相关行为按 `docs/ai/webui.md` 不折叠),同步中英 locale 与插件字段文档、指标标签。
 - README 与 `config*.yaml` 不改:默认配置与能力摘要未变。
