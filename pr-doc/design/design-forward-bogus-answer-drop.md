@@ -1,8 +1,8 @@
 # 设计:forward 丢弃命中虚假地址的上游应答
 
-状态:设计定稿,未实现(对齐 milestone v1.8.0)
+状态:已实现,分支 `feat/forward-bogus-answers` 已并入上游 `v1.8.0`(对齐 milestone v1.8.0)
 需求来源:[issue #441](https://github.com/svenshi/oxidns/issues/441)
-基线:分支 `learning-doc` @ `33971b3f`(v1.7.1)
+基线:实现起于 `origin/main` @ `ad2046d3`(v1.7.1);2026-11 合并 `origin/v1.8.0`(merge commit `1bdca6f2`),冲突集中在 forward 的 WebUI metric labels/help(与上游 `forward_incomplete_alias_selected_total` 本地化同区),两方指标键均保留
 范围:`src/plugin/executor/forward/{bogus,config,factory,single,concurrent,selection,metrics,tests,mod}.rs`、`src/plugin/matcher/rules/{config,mod}.rs`、`webui/lib/plugin-definitions/executor.ts`、WebUI locale、`website/docs/plugin-reference/executor/resolution.mdx` 及英文 i18n
 取代:无(首版)
 

@@ -1,6 +1,6 @@
 # PR:feat(forward): drop upstream answers matching bogus_answer_ips
 
-> 目标分支:`svenshi/oxidns:main` · 对应 issue #441 · milestone v1.8.0
+> 目标分支:`svenshi/oxidns:main` · 对应 issue #441 · milestone v1.8.0 · 已并入上游 `v1.8.0`(merge `1bdca6f2`)
 
 ## 摘要
 
@@ -66,11 +66,13 @@ cargo check --no-default-features --features standard
 cargo +nightly fmt --all --check
 cargo +nightly clippy --all-targets --all-features
 npm run typecheck   # webui
-npm test            # webui, 269 passed
+npm test            # webui, 273 passed(并入 v1.8.0 后)
 npm run lint        # webui
 ```
 
-已知预先存在问题(与本次改动无关,main 上即可复现):`src/infra/network/dial.rs` 的 clippy `needless_bool` 警告、未使用的 `tar` 依赖警告。
+并入上游 `v1.8.0` 后复核:`cargo test` lib 1330 / integration 117 全通过,`fmt --check` 通过,WebUI 273 tests / typecheck / lint 全通过。v1.8.0 自带 `dial.rs` 的 clippy 修复,pre-commit hook 已能通过。
+
+已知预先存在问题(与本次改动无关):未使用的 `tar` 依赖警告(并入 v1.8.0 后仍存在);CI bundle 的 flaky scheduler 测试见 `learning/issues.md` ISSUE-005。
 
 ## 文档跟进
 
