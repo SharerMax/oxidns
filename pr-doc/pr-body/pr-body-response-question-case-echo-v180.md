@@ -1,5 +1,7 @@
 # PR:fix(server): echo the request's question case in responses
 
+> **状态:别名分支,已由 `fix/response-question-case-echo` 取代。** 该分支内容已强制推送到原分支名,请以 `pr-doc/pr-body/pr-body-response-question-case-echo.md` 为准开 PR。
+
 **目标分支**:svenshi/oxidns `v1.8.0`
 **来源分支**:SharerMax/oxidns `fix/response-question-case-echo-v180`(1 个提交 `9e009eee`,基于 `origin/v1.8.0` @ `31a011af`)
 **创建命令**:

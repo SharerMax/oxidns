@@ -1,6 +1,6 @@
 # 设计:响应回显当前请求的 question 大小写
 
-状态:已实现,首选分支 `fix/response-question-case-echo-v180`(提交 `9e009eee`,基于 `origin/v1.8.0` @ `31a011af`);原实现在 `fix/response-question-case-echo`(提交 `31240490`,基于 `origin/main` @ `b8d30262`,后合入 v1.8.0)
+状态:已实现,PR 分支 `fix/response-question-case-echo`(提交 `9e009eee`,基于 `origin/v1.8.0` @ `31a011af`,由原实现 `31240490` cherry-pick 得到并已强推替换旧 4 提交版本);别名分支 `fix/response-question-case-echo-v180` 指向同一提交
 需求来源:代码审查自查(forward/cache 路径的响应 question 未回显客户端原始大小写)
 基线:`origin/main` @ `b8d30262`(v1.7.1 之后)
 范围:`src/plugin/server/request.rs`、`src/plugin/test_utils.rs`、`crates/proto/src/name.rs`(测试)、`src/plugin/executor/cache/mod.rs`(测试)

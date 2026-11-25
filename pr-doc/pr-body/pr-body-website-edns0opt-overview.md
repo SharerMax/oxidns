@@ -64,4 +64,4 @@ Documentation content checks failed:
 ## 关联
 
 - 拆出来源:`fix/response-question-case-echo` 上的 `e43e2c8a`,已由本独立分支取代。
-- 另 PR:`fix/response-question-case-echo-v180`(question 大小写回显修复),与本 PR 无代码依赖。
+- 另 PR:`fix/response-question-case-echo`(question 大小写回显修复,基于 v1.8.0),与本 PR 无代码依赖。
