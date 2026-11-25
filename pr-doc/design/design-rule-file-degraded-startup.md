@@ -65,14 +65,14 @@ Geosite、AdGuard Rule 等依赖外部规则文件的插件,文件缺失/损坏�
 | `domain_set` | `domain_set.rs` | 逐文件容错;快照记录 degraded 文件 |
 | `adguard_rule` | `mod.rs` + `compiler.rs`(`build_rule_buckets`) | 同上 |
 | `ip_set` | `ip_set.rs` | 同上(多文件) |
-| `geosite` / `geoip` | `geosite.rs` / `geoip.rs` | 单文件:仅 `DatFileSession::open` 的 I/O 失败(`DnsError::Io`)→ `error!` + degraded 标记;dat 内容/选择器错误(`DnsError::Plugin`)保持致命;degraded 状态独立于快照,reload 失败时保留上次正常 matcher |
+| `geosite` / `geoip` | `geosite.rs` / `geoip.rs` | 单文件:仅 `DatFileSession::open` 的 I/O 失败(`DnsError::Io`)→ `error!` + 空快照 + degraded 标记;dat 内容/选择器错误(`DnsError::Plugin`)保持致命;degraded 标记随快照一起发布 |
 
 统一约束:
 
 - **文件不可用**才降级:多源 provider 按文件跳过;单文件 provider 仅 `DnsError::Io` 走降级;
 - **config 级错误**(selector 解析失败、空文件名等)仍在 `create()` 阶段致命;**内容错误**(非法 CIDR、无匹配条目、dat 解析失败等)保持 `Err`,不能伪装成文件不可用;
-- `reload()` 在文件不可用时返回 `Ok(())` + degraded 标记,但不替换已发布的快照:启动时快照为空,reload 时保留上次正常 matcher;
-  只有真正致命的构建错误(任务 panic、内存失败、内容错误)保持 `Err`。
+- `reload()` 在文件不可用时返回 `Ok(())`,并发布按当前可用源重建的新快照:多源 provider 保留其余规则,单文件 provider 因无其他源而为空快照;
+  每次 reload 都重新评估文件集,文件仍缺失则继续降级,文件补齐则收编;只有真正致命的构建错误(任务 panic、内存失败、内容错误)保持 `Err`。
 
 ### 2.3 Provider trait 扩展(`src/plugin/provider/mod.rs`)
 
