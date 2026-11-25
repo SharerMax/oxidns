@@ -1,6 +1,6 @@
 # 设计:响应回显当前请求的 question 大小写
 
-状态:已实现,分支 `fix/response-question-case-echo`(提交 `31240490`),基于 `origin/main` @ `b8d30262`;该分支已合入上游 `v1.8.0`(`31a011af`,合并提交 `4d5a64ba`)
+状态:已实现,首选分支 `fix/response-question-case-echo-v180`(提交 `9e009eee`,基于 `origin/v1.8.0` @ `31a011af`);原实现在 `fix/response-question-case-echo`(提交 `31240490`,基于 `origin/main` @ `b8d30262`,后合入 v1.8.0)
 需求来源:代码审查自查(forward/cache 路径的响应 question 未回显客户端原始大小写)
 基线:`origin/main` @ `b8d30262`(v1.7.1 之后)
 范围:`src/plugin/server/request.rs`、`src/plugin/test_utils.rs`、`crates/proto/src/name.rs`(测试)、`src/plugin/executor/cache/mod.rs`(测试)
@@ -211,4 +211,4 @@ cargo +nightly clippy --all-targets --all-features -- -D warnings  # 通过
 - 只对齐大小写差异;语义不同的 question 保留原样,避免掩盖真实错误。
 - 不增加配置开关、metrics 或 WebUI 表面。
 - 测试断言基于 wire 字节,而非小写化的 presentation。
-- 实现提交:`31240490 fix(server): echo the request's question case in responses`。
+- 实现提交:`31240490 fix(server): echo the request's question case in responses`;以 v1.8.0 为基准的 PR 分支由同一补丁 cherry-pick 得到 `9e009eee`。

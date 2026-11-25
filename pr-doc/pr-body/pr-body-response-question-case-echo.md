@@ -1,5 +1,7 @@
 # PR:fix(server): echo the request's question case in responses
 
+> **状态:已取代。** 本分支含 v1.8.0 合并提交与两个基线补丁;请改用 `fix/response-question-case-echo-v180`(基于 `origin/v1.8.0`,单一修复提交 `9e009eee`),PR body 见 `pr-doc/pr-body/pr-body-response-question-case-echo-v180.md`。
+
 **目标分支**:svenshi/oxidns `main`
 **来源分支**:SharerMax/oxidns `fix/response-question-case-echo`(4 个提交,基于 `origin/main` @ `b8d30262`,已合入上游 `v1.8.0` @ `31a011af`)
 **创建命令**:
