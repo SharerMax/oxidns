@@ -1,7 +1,7 @@
 # PR:fix(server): echo the request's question case in responses
 
 **目标分支**:svenshi/oxidns `main`
-**来源分支**:SharerMax/oxidns `fix/response-question-case-echo`(3 个提交,基于 `origin/main` @ `b8d30262`,已合入上游 `v1.8.0` @ `31a011af`)
+**来源分支**:SharerMax/oxidns `fix/response-question-case-echo`(4 个提交,基于 `origin/main` @ `b8d30262`,已合入上游 `v1.8.0` @ `31a011af`)
 **创建命令**:
 
 ```bash
@@ -33,7 +33,7 @@ forward 与缓存路径不保证响应 question 区回显客户端原始大小�
 
 ## 合入基线
 
-分支从 `origin/main`(`b8d30262`)直接切出,随后合入上游 `origin/v1.8.0`(`31a011af`,含 `edns0opt` matcher、upstream pool wakeup、`dial.rs` clippy 修复 #450 等 14 个提交),目标分支仍为 `main`,合入后自动改基。相对目标分支的 diff 为下列 3 个提交。设计文档保存在 `learning-doc` 分支 `pr-doc/design/design-response-question-case-echo.md`,不进入本 PR 的代码 diff。
+分支从 `origin/main`(`b8d30262`)直接切出,随后合入上游 `origin/v1.8.0`(`31a011af`,含 `edns0opt` matcher、upstream pool wakeup、`dial.rs` clippy 修复 #450 等 14 个提交),目标分支仍为 `main`,合入后自动改基。相对目标分支的 diff 为下列 4 个提交。设计文档保存在 `learning-doc` 分支 `pr-doc/design/design-response-question-case-echo.md`,不进入本 PR 的代码 diff。
 
 ## 提交
 
@@ -42,6 +42,7 @@ forward 与缓存路径不保证响应 question 区回显客户端原始大小�
 | `31240490` | fix(server): echo the request's question case in responses |
 | `4d5a64ba` | Merge origin/v1.8.0 into fix/response-question-case-echo |
 | `8dbc1c8c` | style: reformat merged v1.8.0 comments with nightly rustfmt |
+| `e43e2c8a` | docs(website): list edns0opt in matcher overview catalogs |
 
 ## 变更明细
 
@@ -68,6 +69,7 @@ forward 与缓存路径不保证响应 question 区回显客户端原始大小�
 | `cargo test` | 1429 passed / 0 failed / 4 ignored(lib 1308、feature_gating 5、plugin_integration 116) |
 | `cargo +nightly fmt --all -- --check` | 通过 |
 | `cargo +nightly clippy --all-targets --all-features -- -D warnings` | 见下方说明 |
+| `node scripts/check-content.mjs`(website) | 通过(修复前:zh-Hans/en matcher overview 缺 `edns0opt`) |
 
 新增用例:
 
@@ -84,4 +86,5 @@ forward 与缓存路径不保证响应 question 区回显客户端原始大小�
 
 - 设计文档:`pr-doc/design/design-response-question-case-echo.md`(`learning-doc` 分支),含决策表、行为矩阵、被拒方案与后续 0x20 扩展。
 - 合入 `v1.8.0` 后复核:`cargo test` 1429 passed / `fmt --check` 通过 / `clippy -D warnings` 通过;rustfmt 仅修正上游合入内容的两个注释换行(`reuse.rs`、`edns0opt.rs`),无行为变化。
+- `npm run build` 的内容检查一度因 `edns0opt` 未出现在 zh-Hans/en matcher overview 而失败(上游 v1.8.0 已加 reference 页与 landing 条目,漏了 overview 目录);`e43e2c8a` 补齐两处目录后 `node scripts/check-content.mjs` 通过。本地无 `website/node_modules`,未跑完整 docusaurus build。
 - 未新增/修改 `config*.yaml`、WebUI、website 文档与 `README*.md`:question 回显属协议正确性,不是可配置行为。
