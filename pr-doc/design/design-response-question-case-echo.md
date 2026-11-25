@@ -1,6 +1,6 @@
 # 设计:响应回显当前请求的 question 大小写
 
-状态:已实现,分支 `fix/response-question-case-echo`(提交 `31240490`),基于 `origin/main` @ `b8d30262`
+状态:已实现,分支 `fix/response-question-case-echo`(提交 `31240490`),基于 `origin/main` @ `b8d30262`;该分支已合入上游 `v1.8.0`(`31a011af`,合并提交 `4d5a64ba`)
 需求来源:代码审查自查(forward/cache 路径的响应 question 未回显客户端原始大小写)
 基线:`origin/main` @ `b8d30262`(v1.7.1 之后)
 范围:`src/plugin/server/request.rs`、`src/plugin/test_utils.rs`、`crates/proto/src/name.rs`(测试)、`src/plugin/executor/cache/mod.rs`(测试)
@@ -167,21 +167,20 @@ fn restore_question_echo(request: &Message, response: &mut Message) {
 - 断言必须读取编码后的 wire 字节:`Name::to_fqdn`/`Display` 均折叠为小写,
   直接断言会得到假阴性。共享 helper `encoded_question_fqdn` 放在
   `src/plugin/test_utils.rs`,从报文第 12 字节起逐标签还原 qname。
-- 现有 server 集成测试(`tests/plugin_integration.rs`,115 项)覆盖 UDP/TCP
+- 现有 server 集成测试(`tests/plugin_integration.rs`,合入 v1.8.0 后 116 项)覆盖 UDP/TCP
   真实收发,未新增集成用例:本修复的输入输出已在 `handle_request` 单测中
   完整覆盖,集成层不引入额外分支。
 
 验证命令与结果:
 
 ```text
-cargo test                                                   # 全绿,含 115 项集成测试
+cargo test                                                   # 全绿,含 116 项集成测试
 cargo +nightly fmt --all -- --check                          # 通过
-cargo +nightly clippy --all-targets --all-features -- -D warnings
+cargo +nightly clippy --all-targets --all-features -- -D warnings  # 通过
 ```
 
-说明:`clippy` 在本改动范围内无告警;整仓门禁当前被 `main` 上既有的
-`src/infra/network/dial.rs:483` `clippy::needless_bool` 阻塞(与本修复无关,
-由 `fix/clippy-needless-bool` 分支单独处理)。
+说明:合入上游 `v1.8.0`(含 #450 对 `dial.rs` 的修复)后,整仓 `clippy -D warnings`
+与 `fmt --check` 均通过;此前 `main` 上的 `clippy::needless_bool` 阻塞已消除。
 
 ## 5. 同步面清单
 

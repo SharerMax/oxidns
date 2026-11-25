@@ -1,7 +1,7 @@
 # PR:fix(server): echo the request's question case in responses
 
 **目标分支**:svenshi/oxidns `main`
-**来源分支**:SharerMax/oxidns `fix/response-question-case-echo`(1 个提交,基于 `origin/main` @ `b8d30262`)
+**来源分支**:SharerMax/oxidns `fix/response-question-case-echo`(3 个提交,基于 `origin/main` @ `b8d30262`,已合入上游 `v1.8.0` @ `31a011af`)
 **创建命令**:
 
 ```bash
@@ -33,13 +33,15 @@ forward 与缓存路径不保证响应 question 区回显客户端原始大小�
 
 ## 合入基线
 
-分支从 `origin/main`(`b8d30262`)直接切出,不含 merge 提交;相对目标分支的 diff 为下列 1 个提交。设计文档保存在 `learning-doc` 分支 `pr-doc/design/design-response-question-case-echo.md`,不进入本 PR 的代码 diff。
+分支从 `origin/main`(`b8d30262`)直接切出,随后合入上游 `origin/v1.8.0`(`31a011af`,含 `edns0opt` matcher、upstream pool wakeup、`dial.rs` clippy 修复 #450 等 14 个提交),目标分支仍为 `main`,合入后自动改基。相对目标分支的 diff 为下列 3 个提交。设计文档保存在 `learning-doc` 分支 `pr-doc/design/design-response-question-case-echo.md`,不进入本 PR 的代码 diff。
 
 ## 提交
 
 | 提交(本分支) | 内容 |
 |---|---|
 | `31240490` | fix(server): echo the request's question case in responses |
+| `4d5a64ba` | Merge origin/v1.8.0 into fix/response-question-case-echo |
+| `8dbc1c8c` | style: reformat merged v1.8.0 comments with nightly rustfmt |
 
 ## 变更明细
 
@@ -63,7 +65,7 @@ forward 与缓存路径不保证响应 question 区回显客户端原始大小�
 
 | 命令 | 结果 |
 |------|------|
-| `cargo test` | 1413 passed / 0 failed / 4 ignored(lib 1293、feature_gating 5、plugin_integration 115) |
+| `cargo test` | 1429 passed / 0 failed / 4 ignored(lib 1308、feature_gating 5、plugin_integration 116) |
 | `cargo +nightly fmt --all -- --check` | 通过 |
 | `cargo +nightly clippy --all-targets --all-features -- -D warnings` | 见下方说明 |
 
@@ -76,9 +78,10 @@ forward 与缓存路径不保证响应 question 区回显客户端原始大小�
 | `finalize_response_rebuilds_missing_question_section` | `src/plugin/server/request.rs` |
 | `cache_hit_restores_current_request_question_case` | `src/plugin/executor/cache/mod.rs` |
 
-> clippy 说明:本机(Windows)运行时被 `main` 上既有的 `src/infra/network/dial.rs:483` `clippy::needless_bool` 拦截,该文件未在本 PR 中修改;本改动在 `-A clippy::needless-bool` 下无任何告警。同一问题的独立修复分支 `fork/fix/clippy-needless-bool` 已存在。同理,本分支提交时使用了 `--no-verify` 以绕过该既有 lint。
+> clippy 说明:合入 `v1.8.0`(含上游 #450 对 `dial.rs` 的修复)后,`cargo +nightly clippy --all-targets --all-features -- -D warnings` 完整通过,pre-commit hook 不再需要 `--no-verify`。`cargo::unused_dependencies` 对 `tar` 的 cargo warning 属既有问题,不在本 PR 范围内。
 
 ## 关联
 
 - 设计文档:`pr-doc/design/design-response-question-case-echo.md`(`learning-doc` 分支),含决策表、行为矩阵、被拒方案与后续 0x20 扩展。
+- 合入 `v1.8.0` 后复核:`cargo test` 1429 passed / `fmt --check` 通过 / `clippy -D warnings` 通过;rustfmt 仅修正上游合入内容的两个注释换行(`reuse.rs`、`edns0opt.rs`),无行为变化。
 - 未新增/修改 `config*.yaml`、WebUI、website 文档与 `README*.md`:question 回显属协议正确性,不是可配置行为。
