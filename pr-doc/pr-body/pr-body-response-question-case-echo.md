@@ -88,5 +88,5 @@ forward 与缓存路径不保证响应 question 区回显客户端原始大小�
 
 - 设计文档:`pr-doc/design/design-response-question-case-echo.md`(`learning-doc` 分支),含决策表、行为矩阵、被拒方案与后续 0x20 扩展。
 - 合入 `v1.8.0` 后复核:`cargo test` 1429 passed / `fmt --check` 通过 / `clippy -D warnings` 通过;rustfmt 仅修正上游合入内容的两个注释换行(`reuse.rs`、`edns0opt.rs`),无行为变化。
-- `npm run build` 的内容检查一度因 `edns0opt` 未出现在 zh-Hans/en matcher overview 而失败(上游 v1.8.0 已加 reference 页与 landing 条目,漏了 overview 目录);`e43e2c8a` 补齐两处目录后 `node scripts/check-content.mjs` 通过。本地无 `website/node_modules`,未跑完整 docusaurus build。
+- `npm run build` 的内容检查一度因 `edns0opt` 未出现在 zh-Hans/en matcher overview 而失败(上游 v1.8.0 已加 reference 页与 landing 条目,漏了 overview 目录);该补丁已拆出为独立分支 `fix/website-edns0opt-overview`(提交 `1feba871`),内容检查通过。本地无 `website/node_modules`,未跑完整 docusaurus build。
 - 未新增/修改 `config*.yaml`、WebUI、website 文档与 `README*.md`:question 回显属协议正确性,不是可配置行为。

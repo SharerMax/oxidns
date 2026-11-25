@@ -75,7 +75,7 @@ forward 与缓存路径不保证响应 question 区回显客户端原始大小�
 | `finalize_response_rebuilds_missing_question_section` | `src/plugin/server/request.rs` |
 | `cache_hit_restores_current_request_question_case` | `src/plugin/executor/cache/mod.rs` |
 
-> 门禁说明:本 PR 不涉及 `website/**`,`docs-ci` 的 `npm run build` 不会触发;其 `edns0opt` overview 缺口属 v1.8.0 基线问题。本机 nightly 的 `fmt --check` 在 v1.8.0 基线文件 `pool/reuse.rs` 与 `matcher/edns0opt.rs` 上有注释换行差异,本 PR 未改动这两个文件,也未把基线 fmt 修正带入 diff;`rust-ci` 的 `pull_request` 仅覆盖 `main` 与 `release/*`,对 `v1.8.0` 不触发。`cargo::unused_dependencies` 对 `tar` 的 warning 亦为既有问题。
+> 门禁说明:本 PR 不涉及 `website/**`,`docs-ci` 的 `npm run build` 不会触发;v1.8.0 的 `edns0opt` overview 缺口由独立 PR `fix/website-edns0opt-overview` 处理。本机 nightly 的 `fmt --check` 在 v1.8.0 基线文件 `pool/reuse.rs` 与 `matcher/edns0opt.rs` 上有注释换行差异,本 PR 未改动这两个文件,也未把基线 fmt 修正带入 diff;`rust-ci` 的 `pull_request` 仅覆盖 `main` 与 `release/*`,对 `v1.8.0` 不触发。`cargo::unused_dependencies` 对 `tar` 的 warning 亦为既有问题。
 
 ## 关联
 
