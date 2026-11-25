@@ -25,6 +25,7 @@ import {
   fetchConfigFile,
   fetchHealth,
   fetchMatcherStatus,
+  fetchProviderStatus,
   fetchPrometheusMetrics,
   fetchReloadStatus,
   fetchSystem,
@@ -91,7 +92,9 @@ import {
 } from "./matcher-control";
 import {
   reconcileProviderReloads,
+  reconcileProviderStates,
   type ProviderReloadState,
+  type ProviderRuntimeState,
 } from "./provider-reload";
 
 type StoreSet = (
@@ -150,6 +153,12 @@ interface AppState {
   runningDependencyGraph: DependencyGraphReport | null;
   matcherControls: Record<string, MatcherControlState>;
   providerReloads: Record<string, ProviderReloadState>;
+  /**
+   * Sampled degraded state per provider (empty degradedFiles = healthy).
+   * Populated at config/list refresh boundaries and after reload actions;
+   * never polled.
+   */
+  providerStates: Record<string, ProviderRuntimeState>;
   configDiagnostics: string[];
   configHistory: ConfigSnapshot[];
   selectedPlugin: PluginInstance | null;
@@ -197,6 +206,11 @@ interface AppState {
   refreshRuntimeState: () => Promise<void>;
   /** Fetch matcher bypass state once at explicit config/list refresh boundaries. */
   refreshMatcherStates: () => Promise<void>;
+  /**
+   * Sample provider degraded state once at explicit config/list refresh
+   * boundaries and after provider reload actions.
+   */
+  refreshProviderStates: () => Promise<void>;
   refreshMetrics: () => Promise<void>;
   validateCurrentConfig: () => Promise<void>;
   saveConfig: () => Promise<void>;
@@ -252,6 +266,7 @@ let buildInfoBackendKey: string | null = null;
 let requestRateBaseline: RequestCounterSample | null = null;
 let requestRateBaselineBackendKey: string | null = null;
 let matcherRefreshGeneration = 0;
+let providerStatesRefreshGeneration = 0;
 let configLoadGeneration = 0;
 let configValidationGeneration = 0;
 let activeBackendKey: string | null = null;
@@ -313,6 +328,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   runningDependencyGraph: null,
   matcherControls: {},
   providerReloads: {},
+  providerStates: {},
   configDiagnostics: [],
   configHistory: [],
   selectedPlugin: null,
@@ -388,6 +404,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       plugins,
       matcherControls: reconcileMatcherControls(plugins, get().matcherControls),
       providerReloads: reconcileProviderReloads(plugins, get().providerReloads),
+      providerStates: reconcileProviderStates(plugins, get().providerStates),
       selectedPlugin: syncSelectedPlugin(get().selectedPlugin, plugins),
       configError: parsed.diagnostics[0] ?? null,
       configDiagnostics: parsed.diagnostics,
@@ -413,6 +430,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       runningDependencyGraph: null,
       matcherControls: {},
       providerReloads: {},
+      providerStates: {},
       configHistory: [],
       reloadStatus: null,
       health: null,
@@ -451,6 +469,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         },
         matcherControls: {},
         providerReloads: {},
+        providerStates: {},
       });
     }
     set({
@@ -498,6 +517,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       // Matcher bypass state is intentionally sampled with the plugin list.
       // It is not polled; later manual apply/reload actions sample it again.
       await get().refreshMatcherStates();
+      await get().refreshProviderStates();
     } catch (error) {
       if (
         generation !== configLoadGeneration ||
@@ -685,6 +705,72 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
   },
 
+  refreshProviderStates: async () => {
+    const generation = ++providerStatesRefreshGeneration;
+    if (get().isOfflineMode) {
+      set({ providerStates: {} });
+      return;
+    }
+    const providers = get().plugins.filter(
+      (plugin) => plugin.type === "provider",
+    );
+    if (providers.length === 0) {
+      set({ providerStates: {} });
+      return;
+    }
+
+    set((state) => ({
+      providerStates: Object.fromEntries(
+        providers.map((plugin) => [
+          plugin.name,
+          {
+            availability: "loading" as const,
+            status: "running" as const,
+            degradedFiles: [],
+            ...(state.providerStates[plugin.name]?.error
+              ? { error: state.providerStates[plugin.name].error }
+              : {}),
+          },
+        ]),
+      ),
+    }));
+
+    const results = await Promise.allSettled(
+      providers.map(async (plugin) => ({
+        tag: plugin.name,
+        response: await fetchProviderStatus(plugin.name),
+      })),
+    );
+    if (generation !== providerStatesRefreshGeneration) return;
+
+    set((state) => {
+      if (state.isOfflineMode) return {};
+      const providerStates: Record<string, ProviderRuntimeState> = {};
+      results.forEach((result, index) => {
+        const tag = providers[index].name;
+        if (result.status === "fulfilled") {
+          const response = result.value.response;
+          providerStates[tag] = {
+            availability: "ready",
+            status: response.status,
+            degradedFiles: response.degraded_files,
+          };
+        } else {
+          providerStates[tag] = {
+            availability: "unavailable",
+            status: state.providerStates[tag]?.status ?? "running",
+            degradedFiles: state.providerStates[tag]?.degradedFiles ?? [],
+            error:
+              result.reason instanceof Error
+                ? result.reason.message
+                : tClient(WEBUI.plugins.providerRuntimeControl),
+          };
+        }
+      });
+      return { providerStates };
+    });
+  },
+
   refreshMetrics: () => {
     const backendKey = currentBackendKey();
     if (metricsRefreshInFlight?.backendKey === backendKey) {
@@ -866,6 +952,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await get().refreshRuntimeState();
       // Applying the configuration is an explicit manual refresh boundary.
       await get().refreshMatcherStates();
+      await get().refreshProviderStates();
       if (failed) {
         throw new Error(
           snapshot.last_error ||
@@ -1042,7 +1129,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }));
 
     try {
-      await requestProviderReload(plugin.name);
+      const response = await requestProviderReload(plugin.name);
       set((state) => {
         if (
           !state.plugins.some(
@@ -1057,6 +1144,16 @@ export const useAppStore = create<AppState>((set, get) => ({
             [plugin.name]: {
               pending: false,
               outcome: "success",
+            },
+          },
+          // The reload response carries the authoritative degraded state;
+          // use it directly instead of issuing another status request.
+          providerStates: {
+            ...state.providerStates,
+            [plugin.name]: {
+              availability: "ready",
+              status: response.status === "degraded" ? "degraded" : "running",
+              degradedFiles: response.degraded_files ?? [],
             },
           },
         };
@@ -1411,6 +1508,18 @@ function applyConfigFileResponse(
           },
         ]),
     ),
+    providerStates: Object.fromEntries(
+      plugins
+        .filter((plugin) => plugin.type === "provider")
+        .map((plugin) => [
+          plugin.name,
+          {
+            availability: "loading" as const,
+            status: "running" as const,
+            degradedFiles: [],
+          },
+        ]),
+    ),
     selectedPlugin: syncSelectedPlugin(state.selectedPlugin, plugins),
     configError: parsed.diagnostics[0] ?? null,
     configDiagnostics: parsed.diagnostics,
@@ -1500,6 +1609,7 @@ function applyConfigModelToState(
     plugins,
     matcherControls: reconcileMatcherControls(plugins, state.matcherControls),
     providerReloads: reconcileProviderReloads(plugins, state.providerReloads),
+    providerStates: reconcileProviderStates(plugins, state.providerStates),
     configModel,
     configText,
     yamlConfig: configText,

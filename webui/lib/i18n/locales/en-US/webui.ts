@@ -235,6 +235,12 @@ export const enUSWebui = {
     providerReloadUnavailable: "Unavailable in offline mode",
     providerReloadTopologyHint:
       "This does not apply YAML, tag, or dependency-topology changes; those changes still require an application reload.",
+    providerDegradedBadge: "Degraded",
+    providerDegradedTooltip:
+      "Some rule files are missing or unreadable; rules from those files are not in effect. Reload after the files are ready to recover.",
+    providerDegradedHint:
+      "This provider is running degraded: the rule files below could not be loaded, so their rules are not in effect. Reload once the files are ready to recover.",
+    providerDegradedFilesTitle: "Unloaded rule files",
   },
   pluginTypes: {
     server: "Server",

@@ -63,3 +63,37 @@ export function reconcileProviderReloads(
       ]),
   );
 }
+
+export type ProviderRuntimeAvailability = "loading" | "ready" | "unavailable";
+
+export type ProviderRuntimeStatus = "running" | "degraded";
+
+/**
+ * Sampled runtime state of one provider: whether its last snapshot build
+ * could load every configured rule file. Sampled at config boundaries and
+ * after reload actions, never polled.
+ */
+export interface ProviderRuntimeState {
+  availability: ProviderRuntimeAvailability;
+  status: ProviderRuntimeStatus;
+  degradedFiles: string[];
+  error?: string;
+}
+
+export function reconcileProviderStates(
+  plugins: PluginInstance[],
+  current: Record<string, ProviderRuntimeState>,
+): Record<string, ProviderRuntimeState> {
+  return Object.fromEntries(
+    plugins
+      .filter((plugin) => plugin.type === "provider")
+      .map((plugin) => [
+        plugin.name,
+        current[plugin.name] ?? {
+          availability: "loading" as const,
+          status: "running" as const,
+          degradedFiles: [],
+        },
+      ]),
+  );
+}
