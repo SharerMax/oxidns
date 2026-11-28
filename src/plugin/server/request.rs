@@ -9,11 +9,11 @@ use std::sync::Arc;
 use tracing::{Level, debug, event_enabled, warn};
 
 use super::metrics::ServerMetrics;
-use crate::core::context::DnsContext;
 pub use crate::core::context::RequestMeta;
+use crate::core::context::{DnsContext, OriginalQuery};
 use crate::infra::network::ip::normalize_ipv4_mapped_socket_addr;
 use crate::plugin::executor::{ExecStep, Executor};
-use crate::proto::{Edns, Message, MessageType, Opcode, Rcode};
+use crate::proto::{Edns, Message, MessageType, Opcode, Question, Rcode};
 
 #[derive(Debug)]
 pub struct RequestHandle {
@@ -89,7 +89,10 @@ impl RequestHandle {
         }
 
         let (mut response, exit) = if let Some(rcode) = ingress_error {
-            (context.request.response(rcode), RequestExit::Controlled)
+            (
+                self.build_base_response(&context, rcode),
+                RequestExit::Controlled,
+            )
         } else {
             match self
                 .entry_executor
@@ -119,7 +122,7 @@ impl RequestHandle {
             }
         };
 
-        Self::finalize_response(&context.request, &mut response);
+        Self::finalize_response(context.original_query(), &mut response);
 
         if event_enabled!(Level::DEBUG) {
             debug!(
@@ -164,45 +167,76 @@ impl RequestHandle {
 
     #[inline]
     fn build_base_response(&self, context: &DnsContext, rcode: Rcode) -> Message {
-        context.request().response(rcode)
+        // Base responses must be built from the ingress snapshot: the live
+        // request may have been rewritten or replaced downstream, and a
+        // mismatched id, opcode, or question would make clients drop the
+        // response.
+        let original = context.original_query();
+        let (recursion_desired, checking_disabled) = if original.opcode() == Opcode::Query {
+            (original.recursion_desired(), original.checking_disabled())
+        } else {
+            (false, false)
+        };
+        let mut response = Message::new();
+        response.set_id(original.id());
+        response.set_message_type(MessageType::Response);
+        response.set_opcode(original.opcode());
+        response.set_recursion_desired(recursion_desired);
+        response.set_checking_disabled(checking_disabled);
+        response.set_rcode(rcode);
+        response
+            .questions_mut()
+            .extend(original.questions().iter().cloned());
+        response
     }
 
     /// Apply server-level RFC fixes to every outbound response.
-    fn finalize_response(request: &Message, response: &mut Message) {
+    ///
+    /// `original` is the ingress snapshot (`context.original_query`), not the
+    /// live `context.request`, which plugins may legally rewrite or replace
+    /// mid-pipeline. Question echo and the EDNS DO-bit copy must both reflect
+    /// what the client actually sent.
+    fn finalize_response(original: &OriginalQuery, response: &mut Message) {
         response.set_recursion_available(true);
 
-        if request.edns().is_some() && response.edns().is_none() {
+        if let Some(dnssec_ok) = original.edns_do()
+            && response.edns().is_none()
+        {
             let mut edns = Edns::new();
-            if let Some(req_edns) = request.edns() {
-                edns.flags_mut().dnssec_ok = req_edns.flags().dnssec_ok;
-            }
+            edns.flags_mut().dnssec_ok = dnssec_ok;
             response.set_edns(edns);
         }
 
-        Self::restore_question_echo(request, response);
+        Self::restore_question_echo(original.questions(), response);
     }
 
     /// Restore the request's original question spelling in the response.
     ///
     /// DNS names compare case-insensitively, and the cache key is normalized to
     /// lowercase, so an upstream or cached response may echo a differently
-    /// cased (or missing) question. RFC 1035 4.1.2 requires the response
-    /// question section to echo the query, so align it before the response
-    /// leaves the server. The common case only swaps `Name` handles; a length
-    /// mismatch rebuilds the question section from the request.
-    fn restore_question_echo(request: &Message, response: &mut Message) {
-        let request_questions = request.questions();
+    /// cased (or missing) question. RFC 1035 4.1.2 carries the query's question
+    /// section back in every response, and clients that verify 0x20 case
+    /// randomization (RFC 7626) depend on the echoed case, so align it before
+    /// the response leaves the server. The common case only swaps `Name`
+    /// handles; a length mismatch rebuilds the question section from the
+    /// request.
+    fn restore_question_echo(original_questions: &[Question], response: &mut Message) {
         let response_questions = response.questions_mut();
 
-        if response_questions.len() != request_questions.len() {
+        if response_questions.len() != original_questions.len() {
             response_questions.clear();
-            response_questions.extend(request_questions.iter().cloned());
+            response_questions.extend(original_questions.iter().cloned());
             return;
         }
 
         for (response_question, request_question) in
-            response_questions.iter_mut().zip(request_questions)
+            response_questions.iter_mut().zip(original_questions)
         {
+            // A question that differs from the request even case-insensitively
+            // (e.g. a broken upstream answering a different name) is left
+            // as-is on purpose: rewriting it would hide the mismatch while the
+            // answers still cannot satisfy the query, and clients drop such a
+            // response anyway.
             if response_question.name() == request_question.name()
                 && response_question.qtype() == request_question.qtype()
                 && response_question.qclass() == request_question.qclass()
@@ -323,13 +357,16 @@ mod tests {
         }
     }
 
+    /// Simulates a downstream plugin that rewrites the live request question
+    /// and never restores it, like an uncareful `replace_request` user, and
+    /// an upstream that echoes the lowercased spelling back.
     #[derive(Debug)]
-    struct LowercasedQuestionExecutor;
+    struct RequestPollutingExecutor;
 
     #[async_trait]
-    impl Plugin for LowercasedQuestionExecutor {
+    impl Plugin for RequestPollutingExecutor {
         fn tag(&self) -> &str {
-            "lowercased_question"
+            "request_polluting"
         }
 
         async fn init(&mut self, _context: &crate::plugin::PluginInitContext<'_>) -> Result<()> {
@@ -342,19 +379,19 @@ mod tests {
     }
 
     #[async_trait]
-    impl Executor for LowercasedQuestionExecutor {
+    impl Executor for RequestPollutingExecutor {
         async fn execute(&self, context: &mut DnsContext) -> Result<ExecStep> {
-            let mut response = context.request.response(Rcode::NoError);
-            if let Some(question) = response.questions_mut().first_mut() {
+            if let Some(question) = context.request_mut().first_question_mut() {
                 question.set_name(
                     Name::from_ascii(question.name().normalized())
                         .expect("normalized name should parse"),
                 );
             }
+            let mut response = context.request.response(Rcode::NoError);
             response.add_answer(Record::from_rdata(
                 Name::from_ascii("www.example.com.").expect("answer name should parse"),
                 60,
-                RData::A(A(Ipv4Addr::new(192, 0, 2, 1))),
+                RData::A(A(Ipv4Addr::new(192, 0, 2, 2))),
             ));
             context.set_response(response);
             Ok(ExecStep::Return)
@@ -524,33 +561,33 @@ mod tests {
 
         let mut response = Message::new();
         response.set_id(33);
-        RequestHandle::finalize_response(&request, &mut response);
+        RequestHandle::finalize_response(&OriginalQuery::capture(&request), &mut response);
 
         assert!(response.recursion_available());
         assert_eq!(encoded_question_fqdn(&response), "WWW.Example.COM.");
     }
 
     #[tokio::test]
-    async fn test_handle_request_restores_request_question_case_from_upstream() {
-        let request_handle = make_request_handle(Arc::new(LowercasedQuestionExecutor));
-        let request = make_request(31, "WWW.Example.COM.");
+    async fn test_handle_request_echoes_case_after_downstream_request_rewrite() {
+        let request_handle = make_request_handle(Arc::new(RequestPollutingExecutor));
+        let request = make_request(35, "WWW.Example.COM.");
 
         let result = request_handle
             .handle_request(
                 request,
-                SocketAddr::from(([127, 0, 0, 1], 5303)),
+                SocketAddr::from(([127, 0, 0, 1], 5304)),
                 RequestMeta::default(),
             )
             .await;
 
         assert_eq!(
             result.response.answer_ips(),
-            vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))]
+            vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2))]
         );
         assert_eq!(
             encoded_question_fqdn(&result.response),
             "WWW.Example.COM.",
-            "the final response must echo the request's original question case"
+            "the echo must come from the ingress snapshot, not the polluted live request"
         );
     }
 }
